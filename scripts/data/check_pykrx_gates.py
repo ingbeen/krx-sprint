@@ -7,16 +7,12 @@ KRX 서버에 실제 요청을 보내므로 사용자만 직접 실행한다.
 실행 방법은 docs/COMMANDS.md 참고.
 """
 
-import os
 import sys
 import time
 from datetime import datetime
 from importlib.metadata import version
 from typing import Any
 from zoneinfo import ZoneInfo
-
-from dotenv import load_dotenv
-from pykrx import stock
 
 from krx_sprint.collect.gate_checks import (
     DELISTED_SAMPLE_FROM_DATE,
@@ -33,20 +29,22 @@ from krx_sprint.collect.gate_checks import (
     check_ticker_presence,
     compare_market_coverage,
 )
+from krx_sprint.collect.krx_credentials import load_krx_credentials
 from krx_sprint.utils.cli_helpers import cli_exception_handler
 from krx_sprint.utils.formatting import Align, TableLogger
 from krx_sprint.utils.logger import get_logger
 from krx_sprint.utils.meta_manager import save_metadata
 
+# pykrx는 import 시점에 환경 변수를 읽어 인증 세션을 만든다.
+# 자격증명을 먼저 로드해야 첫 조회부터 인증된 세션을 사용한다.
+load_krx_credentials()
+
+from pykrx import stock  # noqa: E402
+
 logger = get_logger()
 
 # meta.json 최상위 키 (scripts/CLAUDE.md 메타데이터 지원 타입)
 KEY_META_TYPE = "pykrx_gate"
-
-# KRX 데이터포털 로그인 환경 변수
-# pykrx는 모든 KRX 조회를 인증 세션으로 보내므로, 미설정 시 응답 본문이 비어 조회가 실패한다
-ENV_KRX_ID = "KRX_ID"
-ENV_KRX_PW = "KRX_PW"
 
 # 결과 요약 테이블 컬럼 정의
 GATE_TABLE_COLUMNS = [
@@ -59,28 +57,6 @@ GATE_TABLE_COLUMNS = [
 DISPLAY_PASS = "통과"
 DISPLAY_FAIL = "실패"
 DISPLAY_OBSERVED = "관측"
-
-
-def _require_krx_credentials() -> None:
-    """.env를 읽어 KRX 로그인 환경 변수가 설정됐는지 확인한다.
-
-    미설정 상태로 조회하면 pykrx 내부에서 빈 응답을 파싱하다 실패하므로,
-    원인을 알기 어려운 예외 대신 실행 전에 중단한다.
-
-    pykrx는 import 시점에 세션을 만들지만, 세션이 없으면 첫 요청 시
-    환경 변수를 다시 읽어 재로그인하므로 여기서 로드해도 인증에 반영된다.
-
-    Raises:
-        ValueError: KRX_ID 또는 KRX_PW가 비어 있는 경우
-    """
-    load_dotenv()
-
-    missing = [name for name in (ENV_KRX_ID, ENV_KRX_PW) if not os.environ.get(name)]
-    if missing:
-        raise ValueError(
-            f"KRX 로그인 자격증명이 없습니다: {', '.join(missing)}. "
-            "프로젝트 루트의 .env에 값을 설정하거나 환경 변수로 export 하십시오 (docs/COMMANDS.md 참고)"
-        )
 
 
 def _wait() -> None:
@@ -249,10 +225,7 @@ def main() -> int:
     Returns:
         종료 코드 (0=게이트 통과, 1=게이트 실패)
     """
-    # 1. 실행 전제 확인
-    _require_krx_credentials()
-
-    # 2. 게이트 실측
+    # 1. 게이트 실측 (자격증명은 모듈 로드 시점에 이미 검증됨)
     gate1 = _run_gate_1()
     gate2_adjusted, gate2_raw = _run_gate_2()
     gate3 = _run_gate_3()

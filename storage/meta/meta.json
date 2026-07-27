@@ -16,5 +16,27 @@
       "today_snapshot_count": 943,
       "timestamp": "2026-07-27T10:03:44+09:00"
     }
+  ],
+  "snapshot_backfill": [
+    {
+      "start_date": "2019-01-01",
+      "last_date": "2026-07-26",
+      "target_count": 1,
+      "collected_count": 0,
+      "holiday_count": 1,
+      "failure_count": 0,
+      "name_count": 0,
+      "timestamp": "2026-07-27T10:51:32+09:00"
+    },
+    {
+      "start_date": "2019-01-01",
+      "last_date": "2026-07-26",
+      "target_count": 21,
+      "collected_count": 21,
+      "holiday_count": 0,
+      "failure_count": 0,
+      "name_count": 2225,
+      "timestamp": "2026-07-27T10:36:32+09:00"
+    }
   ]
 }

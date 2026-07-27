@@ -6,6 +6,7 @@
 
 from datetime import date
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # ============================================================
 # 경로 상수
@@ -20,6 +21,9 @@ SNAPSHOTS_DIR = STORAGE_DIR / "snapshots"  # 1단: 일별 전종목 스냅샷 (�
 ADJUSTED_DIR = STORAGE_DIR / "adjusted"  # 2단: 종목별 수정주가 시계열 parquet
 META_DIR = STORAGE_DIR / "meta"  # 수집 메타데이터 (JSON)
 CACHE_DIR = STORAGE_DIR / "cache"  # 파생 캐시 (git 제외, 언제든 재생성 가능)
+
+# 자격증명 파일 (git 제외). KRX 로그인 정보의 단일 출처
+ENV_FILE_PATH = BASE_DIR / ".env"
 
 # 메타 파일
 NAMES_CSV_PATH = STORAGE_DIR / "names.csv"  # 티커 → 종목명 매핑 (수집 시점 축적)
@@ -37,6 +41,25 @@ COLLECTION_START_DATE = date(2019, 1, 1)
 
 # 수집 대상 시장 (코넥스 제외, 스펙 §5)
 MARKETS = ("KOSPI", "KOSDAQ")
+
+# 프로젝트 기준 타임존
+KST = ZoneInfo("Asia/Seoul")
+
+# 당일 스냅샷 확정 판정 시각 (KST, 0~23)
+# 조회가 성공해도 장중 미확정 값일 수 있으므로(스펙 §0 실측) 이 시각 이전에는 당일을 수집하지 않는다
+SNAPSHOT_CONFIRM_HOUR_KST = 17
+
+# 요청 간 지연 (초, 스펙 §9 레이트리밋)
+REQUEST_DELAY_SECONDS = 1.0
+
+# 조회 실패 시 최대 시도 횟수 (최초 1회 + 재시도)
+MAX_ATTEMPT_COUNT = 3
+
+# 지수 백오프 기본 대기 (초). n번째 재시도 대기 = RETRY_BACKOFF_BASE_SECONDS * 2 ** (n - 1)
+RETRY_BACKOFF_BASE_SECONDS = 2.0
+
+# 가격제한폭 비율 (0.30 = 30%). 등락률이 이를 넘으면 권리락 등 특이일로 보고 경고한다 (스펙 §8)
+PRICE_LIMIT_RATE = 0.30
 
 # ============================================================
 # 스냅샷 컬럼 상수 (내부 계산용 영문 토큰)

@@ -49,7 +49,7 @@ CLI 스크립트 계층(`scripts/`)은 사용자 인터페이스를 제공하며
 - 자동 기록 항목: ISO 8601 타임스탬프 (KST), 실행 파라미터, 핵심 통계
 - 순환 저장: 최근 N개만 유지 (`MAX_HISTORY_COUNT`)
 - 저장 위치: `storage/meta/meta.json`
-- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
+- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크), `snapshot_backfill`(1단 스냅샷 수집). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
 
 근거 위치: [src/krx_sprint/utils/meta_manager.py](../src/krx_sprint/utils/meta_manager.py), [src/krx_sprint/common_constants.py](../src/krx_sprint/common_constants.py)
 
@@ -144,6 +144,7 @@ main 함수:
   - 공통 상수: `src/krx_sprint/common_constants.py`
   - 상수 명명 규칙: 루트 CLAUDE.md 참고
 - 예외를 두는 경우(수집 기간 지정 등)는 사유를 이 문서에 기록한다
+  - `collect_snapshots.py --limit N`: 전체 백필은 두 시간 이상 걸려 한 번에 끝내기 어렵다. 실행 단위를 나누고 시범 수집 범위를 좁히기 위해 일자 수 상한만 인자로 받는다. 수집 시작일·시장 등 나머지 파라미터는 상수로 관리한다
 
 ---
 
