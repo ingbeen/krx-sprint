@@ -19,7 +19,6 @@ from krx_sprint.collect.quality import QualityIssue, Severity, TickerTracker, ch
 from krx_sprint.collect.snapshot_store import list_collected_dates, load_snapshot
 from krx_sprint.common_constants import (
     CACHE_DIR,
-    COL_TICKER,
     COLLECTION_START_DATE,
     HOLIDAYS_JSON_PATH,
     KST,
@@ -69,7 +68,7 @@ def _scan_snapshots() -> tuple[list[QualityIssue], int, int]:
         row_count += len(snapshot)
 
         issues.extend(check_daily_snapshot(snapshot, target))
-        issues.extend(tracker.observe(target, snapshot[COL_TICKER]))
+        issues.extend(tracker.observe(target, snapshot))
 
         if index % PROGRESS_INTERVAL == 0:
             logger.debug("검사 진행: %d/%d일 (%s)", index, len(collected), target)

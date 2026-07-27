@@ -127,3 +127,4 @@ poetry run python scripts/data/check_snapshot_quality.py
 ```
 
 > 오류가 1건이라도 있으면 종료 코드 1을 반환한다. 상세 이슈 목록은 `storage/cache/`에 CSV로 저장된다.
+> 외부 시세와 눈으로 대조하는 수기 검증 절차는 [데이터검증_가이드.md](데이터검증_가이드.md)를 참고한다.

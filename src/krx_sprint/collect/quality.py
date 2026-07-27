@@ -9,7 +9,7 @@
 이 모듈은 데이터를 수정하지 않는다. 탐지·보고만 하고 조치는 사람이 판단한다.
 """
 
-from collections.abc import Container, Iterable
+from collections.abc import Container
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum
@@ -41,6 +41,10 @@ DELISTED_ABSENCE_DAYS = 30
 
 # 거래정지 비율 경고 임계 (비율, 0.5 = 50%)
 HALTED_RATIO_WARN = 0.5
+
+# 상장주식수 급변 경고 임계 (비율, 0.10 = 10%).
+# 증자·감자·액면분할·병합이 있은 날이며, 그날 등락률은 원본가 기준이라 왜곡된다 (스펙 §10.5)
+SHARES_CHANGE_WARN_RATE = 0.10
 
 # 이슈 상세에 담을 위반 종목 샘플 최대 개수
 SAMPLE_LIMIT = 5
@@ -376,47 +380,96 @@ def check_daily_snapshot(snapshot: pd.DataFrame, target: date) -> tuple[QualityI
 
 
 class TickerTracker:
-    """티커별 등장 이력을 스트리밍으로 추적한다.
+    """티커별 등장 이력과 상장주식수 변화를 스트리밍으로 추적한다.
 
-    전체 데이터를 메모리에 올리지 않기 위해 티커별 **직전 등장 일자**만 유지한다.
-    일자를 오름차순으로 `observe`에 넘긴 뒤 `finalize`를 호출한다.
+    전체 데이터를 메모리에 올리지 않기 위해 티커별 **직전 등장 일자와 직전 상장주식수**만
+    유지한다. 일자를 오름차순으로 `observe`에 넘긴 뒤 `finalize`를 호출한다.
     """
 
-    def __init__(self, reuse_gap_days: int = TICKER_REUSE_GAP_DAYS) -> None:
+    def __init__(
+        self,
+        reuse_gap_days: int = TICKER_REUSE_GAP_DAYS,
+        shares_change_rate: float = SHARES_CHANGE_WARN_RATE,
+    ) -> None:
         """추적기를 초기화한다.
 
         Args:
             reuse_gap_days: 재사용 의심으로 판정할 공백 일수
+            shares_change_rate: 상장주식수 급변으로 판정할 변동 비율
         """
         self._reuse_gap_days = reuse_gap_days
+        self._shares_change_rate = shares_change_rate
         self._last_seen: dict[str, date] = {}
+        self._last_shares: dict[str, int] = {}
 
-    def observe(self, target: date, tickers: Iterable[str]) -> tuple[QualityIssue, ...]:
-        """한 일자의 티커 목록을 반영하고 재사용 의심을 판정한다.
+    def observe(self, target: date, snapshot: pd.DataFrame) -> tuple[QualityIssue, ...]:
+        """한 일자 스냅샷을 반영하고 티커 재사용·상장주식수 급변을 판정한다.
 
         Args:
             target: 관측 일자
-            tickers: 해당 일자에 등장한 티커
+            snapshot: 해당 일자 스냅샷
 
         Returns:
-            재사용 의심 이슈
+            재사용 의심·상장주식수 급변 이슈
         """
         issues: list[QualityIssue] = []
 
-        for ticker in tickers:
+        for ticker, shares in zip(snapshot[COL_TICKER], snapshot[COL_SHARES], strict=True):
             previous = self._last_seen.get(ticker)
-            if previous is not None and (target - previous).days > self._reuse_gap_days:
-                issues.append(
-                    QualityIssue(
-                        severity=Severity.WARNING,
-                        category="티커 재사용",
-                        target=ticker,
-                        detail=f"{previous.isoformat()} 이후 {(target - previous).days}일 만에 재등장 ({target.isoformat()})",
+
+            if previous is not None:
+                gap_days = (target - previous).days
+                if gap_days > self._reuse_gap_days:
+                    # 다른 회사일 수 있으므로 상장주식수는 비교하지 않는다
+                    issues.append(
+                        QualityIssue(
+                            severity=Severity.WARNING,
+                            category="티커 재사용",
+                            target=ticker,
+                            detail=f"{previous.isoformat()} 이후 {gap_days}일 만에 재등장 ({target.isoformat()})",
+                        )
                     )
-                )
+                else:
+                    issues.extend(self._check_shares_change(ticker, target, int(shares)))
+
             self._last_seen[ticker] = target
+            self._last_shares[ticker] = int(shares)
 
         return tuple(issues)
+
+    def _check_shares_change(self, ticker: str, target: date, shares: int) -> list[QualityIssue]:
+        """직전 등장일 대비 상장주식수 급변을 판정한다.
+
+        증자·감자·액면분할·병합이 있은 날이며, 그날 등락률은 원본가 기준이라 왜곡된다.
+        기준봉 판정에서 제외해야 하는 일자를 식별하는 것이 목적이다 (스펙 §10.5).
+
+        Args:
+            ticker: 대상 티커
+            target: 관측 일자
+            shares: 해당 일자 상장주식수
+
+        Returns:
+            급변 이슈 (임계 이하면 빈 목록)
+        """
+        previous_shares = self._last_shares.get(ticker)
+        if previous_shares is None or previous_shares <= 0:
+            return []
+
+        change_ratio = abs(shares - previous_shares) / previous_shares
+        if change_ratio <= self._shares_change_rate:
+            return []
+
+        return [
+            QualityIssue(
+                severity=Severity.WARNING,
+                category="상장주식수 급변",
+                target=ticker,
+                detail=(
+                    f"{target.isoformat()} 상장주식수 {previous_shares:,} → {shares:,} "
+                    f"(변동률 {change_ratio:.4f}). 해당 일자 등락률은 원본가 기준이라 왜곡될 수 있습니다"
+                ),
+            )
+        ]
 
     def finalize(self, last_date: date) -> tuple[QualityIssue, ...]:
         """관측을 마치고 폐지로 볼 티커를 보고한다.

@@ -318,7 +318,11 @@ class TestCheckDailySnapshot:
 
 
 class TestTickerTracker:
-    """티커 등장 이력 추적 계약을 고정한다 (스펙 §10.4)."""
+    """티커 등장 이력·상장주식수 변화 추적 계약을 고정한다 (스펙 §10.4·§10.5)."""
+
+    def _frame(self, entries: list[tuple[str, int]]) -> pd.DataFrame:
+        """(티커, 상장주식수) 목록으로 최소 스냅샷을 만든다."""
+        return _snapshot([_row(ticker=ticker, shares=shares, market_cap=1050 * shares) for ticker, shares in entries])
 
     def test_detects_ticker_reuse_after_long_gap(self):
         """
@@ -332,8 +336,8 @@ class TestTickerTracker:
         tracker = TickerTracker()
 
         # When
-        tracker.observe(date(2019, 1, 2), ["005930"])
-        issues = tracker.observe(date(2020, 1, 2), ["005930"])
+        tracker.observe(date(2019, 1, 2), self._frame([("005930", 10000)]))
+        issues = tracker.observe(date(2020, 1, 2), self._frame([("005930", 10000)]))
 
         # Then
         assert len(issues) == 1
@@ -341,9 +345,9 @@ class TestTickerTracker:
 
     def test_continuous_ticker_has_no_issue(self):
         """
-        목적: 연속으로 등장하는 티커는 이슈가 없다.
+        목적: 연속으로 등장하고 상장주식수가 그대로면 이슈가 없다.
 
-        Given: 인접 영업일에 계속 등장
+        Given: 인접 영업일에 같은 상장주식수로 등장
         When: 순차 관측
         Then: 이슈가 없다
         """
@@ -351,11 +355,93 @@ class TestTickerTracker:
         tracker = TickerTracker()
 
         # When
-        tracker.observe(date(2019, 1, 2), ["005930"])
-        issues = tracker.observe(date(2019, 1, 3), ["005930"])
+        tracker.observe(date(2019, 1, 2), self._frame([("005930", 10000)]))
+        issues = tracker.observe(date(2019, 1, 3), self._frame([("005930", 10000)]))
 
         # Then
         assert issues == ()
+
+    def test_detects_shares_surge(self):
+        """
+        목적: 상장주식수가 급증한 날을 보고한다 (유상·무상증자, 액면분할).
+
+        해당 일자 등락률은 원본가 기준이라 왜곡되므로 기준봉 판정에서 제외해야 한다.
+
+        Given: 상장주식수가 두 배로 늘어난 다음 날
+        When: 순차 관측
+        Then: 상장주식수 급변 경고가 나온다
+        """
+        # Given
+        tracker = TickerTracker()
+
+        # When
+        tracker.observe(date(2019, 1, 2), self._frame([("005930", 10000)]))
+        issues = tracker.observe(date(2019, 1, 3), self._frame([("005930", 20000)]))
+
+        # Then
+        assert len(issues) == 1
+        assert issues[0].category == "상장주식수 급변"
+        assert issues[0].severity is Severity.WARNING
+
+    def test_detects_shares_reduction(self):
+        """
+        목적: 상장주식수가 급감한 날도 보고한다 (감자·주식병합).
+
+        실측 사례: 052670이 2026-02-09에 29,129,064 → 19,419(1,500:1 감자)로
+        바뀌면서 등락률이 +29,948%로 기록됐다.
+
+        Given: 상장주식수가 1/1500로 줄어든 다음 날
+        When: 순차 관측
+        Then: 상장주식수 급변 경고가 나온다
+        """
+        # Given
+        tracker = TickerTracker()
+
+        # When
+        tracker.observe(date(2026, 2, 6), self._frame([("052670", 29129064)]))
+        issues = tracker.observe(date(2026, 2, 9), self._frame([("052670", 19419)]))
+
+        # Then
+        assert len(issues) == 1
+        assert issues[0].category == "상장주식수 급변"
+
+    def test_ignores_small_shares_change(self):
+        """
+        목적: 임계 이하의 소폭 변동은 보고하지 않는다 (경계 조건).
+
+        스톡옵션 행사 등으로 상장주식수는 조금씩 자주 바뀐다.
+
+        Given: 상장주식수가 1% 늘어난 다음 날
+        When: 순차 관측
+        Then: 이슈가 없다
+        """
+        # Given
+        tracker = TickerTracker()
+
+        # When
+        tracker.observe(date(2019, 1, 2), self._frame([("005930", 10000)]))
+        issues = tracker.observe(date(2019, 1, 3), self._frame([("005930", 10100)]))
+
+        # Then
+        assert issues == ()
+
+    def test_reused_ticker_skips_shares_comparison(self):
+        """
+        목적: 재사용 의심 티커는 상장주식수를 비교하지 않는다 (다른 회사일 수 있음).
+
+        Given: 장기 공백 후 상장주식수가 완전히 다른 상태로 재등장
+        When: 순차 관측
+        Then: 재사용 이슈만 나오고 상장주식수 급변은 보고되지 않는다
+        """
+        # Given
+        tracker = TickerTracker()
+
+        # When
+        tracker.observe(date(2019, 1, 2), self._frame([("005930", 10000)]))
+        issues = tracker.observe(date(2020, 1, 2), self._frame([("005930", 99999999)]))
+
+        # Then
+        assert _categories(issues) == {"티커 재사용"}
 
     def test_finalize_reports_delisted_tickers(self):
         """
@@ -367,8 +453,8 @@ class TestTickerTracker:
         """
         # Given
         tracker = TickerTracker()
-        tracker.observe(date(2019, 1, 2), ["117930", "005930"])
-        tracker.observe(date(2020, 6, 1), ["005930"])
+        tracker.observe(date(2019, 1, 2), self._frame([("117930", 10000), ("005930", 10000)]))
+        tracker.observe(date(2020, 6, 1), self._frame([("005930", 10000)]))
 
         # When
         issues = tracker.finalize(date(2020, 6, 1))
@@ -388,7 +474,7 @@ class TestTickerTracker:
         """
         # Given
         tracker = TickerTracker()
-        tracker.observe(date(2020, 6, 1), ["005930"])
+        tracker.observe(date(2020, 6, 1), self._frame([("005930", 10000)]))
 
         # When
         issues = tracker.finalize(date(2020, 6, 1))
