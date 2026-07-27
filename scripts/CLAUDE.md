@@ -49,7 +49,7 @@ CLI 스크립트 계층(`scripts/`)은 사용자 인터페이스를 제공하며
 - 자동 기록 항목: ISO 8601 타임스탬프 (KST), 실행 파라미터, 핵심 통계
 - 순환 저장: 최근 N개만 유지 (`MAX_HISTORY_COUNT`)
 - 저장 위치: `storage/meta/meta.json`
-- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크), `snapshot_backfill`(1단 스냅샷 수집). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
+- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크), `snapshot_backfill`(1단 스냅샷 수집), `snapshot_quality`(품질 검증 리포트). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
 
 근거 위치: [src/krx_sprint/utils/meta_manager.py](../src/krx_sprint/utils/meta_manager.py), [src/krx_sprint/common_constants.py](../src/krx_sprint/common_constants.py)
 

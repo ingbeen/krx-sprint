@@ -180,8 +180,11 @@ def build_snapshot(ohlcv: pd.DataFrame, cap: pd.DataFrame, market: str) -> pd.Da
 def validate_snapshot(snapshot: pd.DataFrame) -> tuple[str, ...]:
     """저장 직전 스냅샷의 무결성을 검증한다 (스펙 §8).
 
-    거래정지(거래량 0 + 시가·고가·저가 0)는 정상 패턴으로 통과시키고,
-    거래량이 있는데 가격이 0 이하인 경우만 이상치로 본다.
+    시가·고가·저가가 0인 것은 이상치가 아니다. 거래정지일뿐 아니라 **정규장에서 가격이
+    형성되지 않고 시간외 거래 등으로만 체결된 날**에도 KRX는 시가·고가·저가를 0으로 주면서
+    종가·거래량·거래대금은 정상 값으로 반환한다(실측, 스펙 §8).
+
+    따라서 반드시 있어야 하는 값은 **종가**다. 거래량이 있는데 종가가 없으면 이상치로 본다.
     등락률이 가격제한폭을 벗어난 경우는 권리락 등 특이일일 수 있으므로 경고로 남긴다.
 
     Args:
@@ -191,7 +194,7 @@ def validate_snapshot(snapshot: pd.DataFrame) -> tuple[str, ...]:
         경고 메시지 튜플 (치명적이지 않은 이상 징후)
 
     Raises:
-        ValueError: 컬럼 누락·음수 가격·거래 중 가격 0 이하·고가 < 저가인 경우
+        ValueError: 컬럼 누락·음수 가격·거래 중 종가 0 이하·고가 < 저가인 경우
     """
     # 1. 구조 검증
     if snapshot.empty:
@@ -209,19 +212,14 @@ def validate_snapshot(snapshot: pd.DataFrame) -> tuple[str, ...]:
         sample = snapshot.loc[negative, COL_TICKER].head(SAMPLE_LIMIT).tolist()
         raise ValueError(f"음수 가격이 있는 종목이 있습니다 ({int(negative.sum())}건, 예: {sample})")
 
-    # 3. 거래정지 패턴 식별 (거래량 0 + 시가·고가·저가 0). 종가는 전일 값이 남을 수 있다
-    halted = (
-        (snapshot[COL_VOLUME] == 0) & (snapshot[COL_OPEN] == 0) & (snapshot[COL_HIGH] == 0) & (snapshot[COL_LOW] == 0)
-    )
+    # 3. 거래량이 있는데 종가가 없으면 이상치 (시가·고가·저가 0은 정상 패턴이므로 제외)
+    invalid_close = (snapshot[COL_VOLUME] > 0) & (snapshot[COL_CLOSE] <= 0)
+    if bool(invalid_close.any()):
+        sample = snapshot.loc[invalid_close, COL_TICKER].head(SAMPLE_LIMIT).tolist()
+        raise ValueError(f"거래가 있는데 종가가 0 이하인 종목이 있습니다 ({int(invalid_close.sum())}건, 예: {sample})")
 
-    # 4. 거래정지가 아닌데 가격이 0 이하면 진짜 이상치
-    invalid_price = prices.le(0).any(axis=1) & ~halted
-    if bool(invalid_price.any()):
-        sample = snapshot.loc[invalid_price, COL_TICKER].head(SAMPLE_LIMIT).tolist()
-        raise ValueError(f"거래가 있는데 가격이 0 이하인 종목이 있습니다 ({int(invalid_price.sum())}건, 예: {sample})")
-
-    # 5. 고가 < 저가 (거래정지 행은 0으로 채워지므로 제외)
-    high_low_invalid = (snapshot[COL_HIGH] < snapshot[COL_LOW]) & ~halted
+    # 4. 고가 < 저가 (둘 다 0인 행은 비교가 성립하지 않으므로 자연히 통과한다)
+    high_low_invalid = snapshot[COL_HIGH] < snapshot[COL_LOW]
     if bool(high_low_invalid.any()):
         sample = snapshot.loc[high_low_invalid, COL_TICKER].head(SAMPLE_LIMIT).tolist()
         raise ValueError(f"고가가 저가보다 낮은 종목이 있습니다 ({int(high_low_invalid.sum())}건, 예: {sample})")

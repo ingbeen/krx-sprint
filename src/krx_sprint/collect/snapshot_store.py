@@ -61,6 +61,31 @@ def list_collected_dates(base_dir: Path = SNAPSHOTS_DIR) -> set[date]:
     return collected
 
 
+def load_snapshot(target: date, base_dir: Path = SNAPSHOTS_DIR) -> pd.DataFrame:
+    """저장된 일자별 스냅샷을 읽는다.
+
+    Args:
+        target: 대상 일자
+        base_dir: 스냅샷 루트 디렉토리
+
+    Returns:
+        스냅샷 DataFrame
+
+    Raises:
+        FileNotFoundError: 해당 일자 파일이 없는 경우
+        ValueError: 저장된 컬럼이 스키마와 다른 경우
+    """
+    path = snapshot_path(target, base_dir)
+    if not path.exists():
+        raise FileNotFoundError(f"스냅샷 파일이 없습니다: {path}")
+
+    snapshot = pd.read_parquet(path)
+    if list(snapshot.columns) != SNAPSHOT_COLUMNS:
+        raise ValueError(f"저장된 스냅샷 컬럼이 스키마와 다릅니다 ({path}): {list(snapshot.columns)}")
+
+    return snapshot
+
+
 def save_snapshot(snapshot: pd.DataFrame, target: date, base_dir: Path = SNAPSHOTS_DIR) -> Path:
     """스냅샷을 일자별 parquet으로 저장한다.
 

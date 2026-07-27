@@ -26,3 +26,6 @@ venv/
 # 파생 캐시 (언제든 재생성 가능, 스펙 §7.2)
 # storage 의 나머지 하위 폴더(snapshots/adjusted/meta)는 git 으로 동기화하므로 제외하지 않는다
 storage/cache/
+
+# 실행 로그 (수집 스크립트 출력 보관용, 동기화 대상 아님)
+logs/

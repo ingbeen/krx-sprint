@@ -16,7 +16,12 @@ from krx_sprint.collect.meta_store import (
     record_holiday,
     remove_failure,
 )
-from krx_sprint.collect.snapshot_store import list_collected_dates, save_snapshot, snapshot_path
+from krx_sprint.collect.snapshot_store import (
+    list_collected_dates,
+    load_snapshot,
+    save_snapshot,
+    snapshot_path,
+)
 from krx_sprint.common_constants import SNAPSHOT_COLUMNS
 
 TARGET = date(2019, 1, 2)
@@ -112,6 +117,40 @@ class TestSaveSnapshot:
         # When / Then
         with pytest.raises(ValueError, match="비어"):
             save_snapshot(empty, TARGET, base_dir=tmp_path)
+
+
+class TestLoadSnapshot:
+    """저장된 스냅샷 로드 계약을 고정한다."""
+
+    def test_loads_saved_snapshot(self, tmp_path: Path):
+        """
+        목적: 저장한 스냅샷을 스키마 그대로 다시 읽는다.
+
+        Given: 저장된 스냅샷
+        When: load_snapshot 호출
+        Then: 컬럼과 값이 유지된다
+        """
+        # Given
+        save_snapshot(_snapshot(), TARGET, base_dir=tmp_path)
+
+        # When
+        loaded = load_snapshot(TARGET, base_dir=tmp_path)
+
+        # Then
+        assert list(loaded.columns) == SNAPSHOT_COLUMNS
+        assert loaded["ticker"].tolist() == ["005930"]
+
+    def test_rejects_missing_file(self, tmp_path: Path):
+        """
+        목적: 없는 일자를 조용히 빈 결과로 넘기지 않는다 (경계 조건).
+
+        Given: 저장되지 않은 일자
+        When: load_snapshot 호출
+        Then: FileNotFoundError가 발생한다
+        """
+        # Given / When / Then
+        with pytest.raises(FileNotFoundError, match="20190102"):
+            load_snapshot(TARGET, base_dir=tmp_path)
 
 
 class TestListCollectedDates:

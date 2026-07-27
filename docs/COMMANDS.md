@@ -108,3 +108,22 @@ poetry run python scripts/data/collect_snapshots.py
 
 > 당일 데이터는 KST 확정 시각(`SNAPSHOT_CONFIRM_HOUR_KST`) 이후에만 수집한다.
 > 그 이전에 실행하면 전 영업일까지만 대상이 된다 — 장중 미확정 값이 저장되는 것을 막기 위함이다.
+
+로그를 남기며 실행하려면 (3시간 이상 걸리므로 절전 방지를 함께 건다):
+
+```bash
+mkdir -p logs
+caffeinate -i poetry run python scripts/data/collect_snapshots.py 2>&1 | tee logs/backfill_$(date +%Y%m%d_%H%M).log
+```
+
+> 진행 상황은 로그보다 파일 수가 정확하다 (파이프 출력은 버퍼링된다): `find storage/snapshots -name '*.parquet' | wc -l`
+
+### 품질 검증 리포트
+
+저장된 parquet만 읽는다. KRX 요청도, 데이터 수정도 하지 않는다.
+
+```bash
+poetry run python scripts/data/check_snapshot_quality.py
+```
+
+> 오류가 1건이라도 있으면 종료 코드 1을 반환한다. 상세 이슈 목록은 `storage/cache/`에 CSV로 저장된다.

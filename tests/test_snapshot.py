@@ -391,9 +391,11 @@ class TestValidateSnapshot:
         # Then
         assert warnings == ()
 
-    def test_rejects_zero_price_with_volume(self):
+    def test_rejects_zero_close_with_volume(self):
         """
-        목적: 거래량이 있는데 가격이 0이면 진짜 이상치로 보고 중단한다 (스펙 §8).
+        목적: 거래량이 있는데 종가가 없으면 이상치로 보고 중단한다 (스펙 §8).
+
+        종가는 거래가 있었다면 반드시 존재해야 하는 유일한 가격이다.
 
         Given: 거래량 500인데 종가 0인 종목
         When: validate_snapshot 호출
@@ -403,8 +405,39 @@ class TestValidateSnapshot:
         snapshot = self._snapshot(**{COL_CLOSE: [0]})
 
         # When / Then
-        with pytest.raises(ValueError, match="가격"):
+        with pytest.raises(ValueError, match="종가"):
             validate_snapshot(snapshot)
+
+    def test_accepts_zero_ohl_when_close_exists(self):
+        """
+        목적: 시가·고가·저가만 0이고 종가·거래량이 정상인 행을 통과시킨다.
+
+        정규장에서 가격이 형성되지 않고 시간외 거래 등으로만 체결된 날의 실측 패턴이다
+        (2019-02-11 056730, 2019-05-29 310200·270520). 이를 이상치로 막으면 해당 일자가
+        통째로 수집되지 못해 데이터에 구멍이 생긴다.
+
+        Given: 시가·고가·저가 0, 종가 1460, 거래량 60795
+        When: validate_snapshot 호출
+        Then: 예외 없이 통과한다
+        """
+        # Given
+        snapshot = self._snapshot(
+            **{
+                COL_OPEN: [0],
+                COL_HIGH: [0],
+                COL_LOW: [0],
+                COL_CLOSE: [1460],
+                COL_VOLUME: [60795],
+                COL_VALUE: [88760700],
+                COL_CHANGE_RATE: [0.0],
+            }
+        )
+
+        # When
+        warnings = validate_snapshot(snapshot)
+
+        # Then
+        assert warnings == ()
 
     def test_rejects_negative_price(self):
         """
