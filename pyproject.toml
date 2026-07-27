@@ -1,0 +1,62 @@
+[tool.poetry]
+name = "krx-sprint"
+authors = ["Yubeen"]
+version = "0.1.0"
+description = "KRX 주도테마 대장주 단기매매 - 데이터 수집 및 백테스트"
+packages = [
+    {include = "krx_sprint", from = "src"},
+]
+
+[tool.poetry.dependencies]
+python = "~3.12"
+pandas = "^2.0.0"
+pyarrow = ">=18.0.0"
+pykrx = "^1.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.0.0"
+ruff = "^0.8.0"
+pandas-stubs = "^2.0.0"
+pytest = "^9.0.2"
+pytest-cov = "^7.0.0"
+freezegun = "^1.5.5"
+pyright = "^1.1.407"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 120
+target-version = ['py312']
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["reference"]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long은 Black 스타일 존중
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["krx_sprint"]
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+show_missing = true
