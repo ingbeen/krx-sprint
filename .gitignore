@@ -19,6 +19,10 @@ venv/
 .vscode/
 .idea/
 
+# 자격증명 (KRX 로그인 등) — 저장소에 절대 포함하지 않는다
+.env
+.env.*
+
 # 파생 캐시 (언제든 재생성 가능, 스펙 §7.2)
 # storage 의 나머지 하위 폴더(snapshots/adjusted/meta)는 git 으로 동기화하므로 제외하지 않는다
 storage/cache/

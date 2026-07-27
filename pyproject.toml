@@ -12,6 +12,7 @@ python = "~3.12"
 pandas = "^2.0.0"
 pyarrow = ">=18.0.0"
 pykrx = "^1.0"
+python-dotenv = "^1.2.2"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.0.0"
@@ -29,6 +30,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.black]
 line-length = 120
 target-version = ['py312']
+extend-exclude = "^/reference/"
 
 [tool.ruff]
 line-length = 120

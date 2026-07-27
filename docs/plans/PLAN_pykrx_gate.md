@@ -3,7 +3,7 @@
 > 작성/운영 규칙(SoT): 반드시 [docs/CLAUDE.md](../CLAUDE.md)를 참고하세요.  
 > (이 템플릿을 수정하거나 새로운 양식의 계획서를 만들 때도 [docs/CLAUDE.md](../CLAUDE.md)를 포인터로 두고 준수합니다.)
 
-**상태**: 🟡 Draft
+**상태**: ✅ Done
 
 ---
 
@@ -20,7 +20,7 @@
 ---
 
 **작성일**: 2026-07-27 09:18
-**마지막 업데이트**: 2026-07-27 09:18
+**마지막 업데이트**: 2026-07-27 10:10
 **관련 범위**: collect(신규), scripts/data, tests, docs
 **관련 문서**: [scripts/CLAUDE.md](../../scripts/CLAUDE.md), [tests/CLAUDE.md](../../tests/CLAUDE.md), [docs/CLAUDE.md](../CLAUDE.md), [docs/데이터수집_스펙_v2.md](../데이터수집_스펙_v2.md), [docs/ROADMAP.md](../ROADMAP.md)
 
@@ -41,10 +41,10 @@
 
 ## 1) 목표(Goal)
 
-- [ ] 목표 1: 스펙 §3.3 게이트 1(1단 스냅샷의 폐지 종목 보존)·게이트 2(2단 개별 조회의 폐지 종목 지원)·게이트 3(`market="ALL"`의 코넥스 포함 여부)를 **실측으로 확정**한다
-- [ ] 목표 2: 게이트 **판정 규칙**을 pykrx 없이 검증 가능한 순수 함수로 분리하고 스텁 기반 테스트로 계약을 고정한다
-- [ ] 목표 3: 부가 실측(pykrx 설치 버전·KRX 로그인 경고 여부·거래정지일 OHL=0 동작·당일 데이터 확정 시각 관측)을 스팟체크 스크립트 1회 실행으로 수집한다
-- [ ] 목표 4: 실측 결과를 스펙 §0 "구현 시 실측 검증할 것" 항목에 반영해, Phase 2(수집기) 착수 조건을 닫는다
+- [x] 목표 1: 스펙 §3.3 게이트 1(1단 스냅샷의 폐지 종목 보존)·게이트 2(2단 개별 조회의 폐지 종목 지원)·게이트 3(`market="ALL"`의 코넥스 포함 여부)를 **실측으로 확정**한다
+- [x] 목표 2: 게이트 **판정 규칙**을 pykrx 없이 검증 가능한 순수 함수로 분리하고 스텁 기반 테스트로 계약을 고정한다
+- [x] 목표 3: 부가 실측(pykrx 설치 버전·KRX 로그인 경고 여부·거래정지일 OHL=0 동작·당일 데이터 확정 시각 관측)을 스팟체크 스크립트 1회 실행으로 수집한다
+- [x] 목표 4: 실측 결과를 스펙 §0 "구현 시 실측 검증할 것" 항목에 반영해, Phase 2(수집기) 착수 조건을 닫는다
 
 ## 2) 비목표(Non-Goals)
 
@@ -77,12 +77,12 @@
 
 > Done은 "서술"이 아니라 "체크리스트 상태"로만 판단합니다. (정의/예외는 docs/CLAUDE.md)
 
-- [ ] 게이트 1·2·3의 실측 결과가 확보되고 스펙 §0에 기록됨
-- [ ] 게이트 판정 순수 함수에 대한 스텁 기반 테스트 추가 (네트워크 호출 없음)
-- [ ] `poetry run python validate_project.py` 통과 (failed=0, skipped=0; passed/failed/skipped 수 기록)
-- [ ] `poetry run black .` 실행 완료 (마지막 Phase에서 자동 포맷 적용)
-- [ ] 필요한 문서 업데이트(README.md / `docs/COMMANDS.md` / CLAUDE.md / plan 등 — 각각 변경 여부 명시)
-- [ ] plan 체크박스 최신화(Phase/DoD/Validation 모두 반영)
+- [x] 게이트 1·2·3의 실측 결과가 확보되고 스펙 §0에 기록됨
+- [x] 게이트 판정 순수 함수에 대한 스텁 기반 테스트 추가 (네트워크 호출 없음)
+- [x] `poetry run python validate_project.py` 통과 (passed=31, failed=0, skipped=0)
+- [x] `poetry run black .` 실행 완료 (마지막 Phase에서 자동 포맷 적용, 14개 파일 변경 없음)
+- [x] 필요한 문서 업데이트 — `docs/데이터수집_스펙_v2.md`(§0 실측 결과) / `docs/COMMANDS.md`(KRX 로그인·스팟체크 실행) / `scripts/CLAUDE.md`(메타 타입) 변경 있음, `README.md` 변경 없음
+- [x] plan 체크박스 최신화(Phase/DoD/Validation 모두 반영)
 
 ## 5) 변경 범위(Scope)
 
@@ -111,11 +111,11 @@
 
 **작업 내용**:
 
-- [ ] 판정 함수의 인터페이스·반환 타입·예외 정책을 확정한다
+- [x] 판정 함수의 인터페이스·반환 타입·예외 정책을 확정한다
   - 폐지 종목 보존 판정: 스냅샷 DataFrame(index=티커)에 대상 티커가 존재하는지
   - 코넥스 포함 판정: `ALL` 티커 집합이 `KOSPI ∪ KOSDAQ`의 진부분집합이 아닌 경우(초과분 존재) 코넥스 포함으로 본다
   - 빈 DataFrame(휴장·조회 실패)은 "없음"으로 조용히 넘기지 않고 ValueError로 구분한다 (루트 CLAUDE.md 명시적 검증)
-- [ ] `tests/test_gate_checks.py`에 스텁 DataFrame/집합 기반 테스트를 최대한 먼저 작성 (레드 허용)
+- [x] `tests/test_gate_checks.py`에 스텁 DataFrame/집합 기반 테스트를 최대한 먼저 작성 (레드 허용)
   - 티커 존재/부재, 빈 입력, 티커 dtype이 문자열이 아닌 경우
   - ALL이 KOSPI+KOSDAQ와 동일한 경우 / 초과 티커가 있는 경우 / ALL이 더 적은 경우(비정상)
 
@@ -125,9 +125,9 @@
 
 **작업 내용**:
 
-- [ ] `src/krx_sprint/collect/gate_checks.py` 구현으로 Phase 0 테스트를 통과시킨다
-- [ ] 판정 결과는 boolean 단독이 아니라 근거 수치(건수·초과 티커 샘플)를 함께 담은 결과 타입으로 반환한다 (스펙 §0 기록용)
-- [ ] 이 모듈은 pykrx를 import 하지 않는다 — 호출은 스크립트 계층이 담당한다 (테스트에서 네트워크 의존 제거)
+- [x] `src/krx_sprint/collect/gate_checks.py` 구현으로 Phase 0 테스트를 통과시킨다
+- [x] 판정 결과는 boolean 단독이 아니라 근거 수치(건수·초과 티커 샘플)를 함께 담은 결과 타입으로 반환한다 (스펙 §0 기록용)
+- [x] 이 모듈은 pykrx를 import 하지 않는다 — 호출은 스크립트 계층이 담당한다 (테스트에서 네트워크 의존 제거)
 
 ---
 
@@ -135,20 +135,20 @@
 
 **작업 내용**:
 
-- [ ] `scripts/data/check_pykrx_gates.py` 작성
+- [x] `scripts/data/check_pykrx_gates.py` 작성
   - 게이트 1: 한진해운(`117930`)이 폐지 전 일자의 `get_market_ohlcv_by_ticker(date, market)` 결과에 존재하는가
   - 게이트 2: `get_market_ohlcv(fromdate, todate, "117930", adjusted=True/False)`가 데이터를 반환하는가
-  - 게이트 3: `get_market_ticker_list(date, market="ALL")` vs `KOSPI + KOSDAQ` 티커 집합 비교
+  - 게이트 3: `get_market_ticker_list(date, market="ALL")` vs `KOSPI + KOSDAQ` 티커 집합 비교 (초과분의 정체 확인을 위해 KONEX 목록도 함께 조회)
   - 부가 실측: 설치된 pykrx 버전, 실행 중 발생한 경고, 거래정지 의심 종목의 OHL/거래량 패턴 샘플, 실행 시각과 당일 조회 결과
-- [ ] `@cli_exception_handler` 적용, 모듈 레벨 `logger`, `TableLogger`로 결과 요약 출력, 종료 코드 반환
-- [ ] 요청 간 지연(sleep)을 넣고 총 호출 수를 최소로 유지 (스펙 §9 레이트리밋)
-- [ ] `meta_manager.save_metadata`로 실행 이력 기록
-- [ ] `docs/COMMANDS.md`에 실행 명령어 추가
-- [ ] 스크립트 실행을 사용자에게 요청 (AI는 실행하지 않음 — 루트 CLAUDE.md 스크립트 실행 규칙)
+- [x] `@cli_exception_handler` 적용, 모듈 레벨 `logger`, `TableLogger`로 결과 요약 출력, 종료 코드 반환
+- [x] 요청 간 지연(sleep)을 넣고 총 호출 수를 최소로 유지 (스펙 §9 레이트리밋)
+- [x] `meta_manager.save_metadata`로 실행 이력 기록
+- [x] `docs/COMMANDS.md`에 실행 명령어 추가
+- [x] 스크립트 실행을 사용자에게 요청 (AI는 실행하지 않음 — 루트 CLAUDE.md 스크립트 실행 규칙)
 
 **Validation**:
 
-- [ ] 사용자 실행 결과 로그 확보 (게이트 3건 + 부가 실측 항목)
+- [x] 사용자 실행 결과 로그 확보 (게이트 3건 + 부가 실측 항목)
 
 ---
 
@@ -156,9 +156,9 @@
 
 **작업 내용**:
 
-- [ ] 스펙 §0 "구현 시 실측 검증할 것" 항목에 게이트별 결과(값·근거·측정 일자)를 기록
-- [ ] 게이트 실패 항목이 있으면 대응 방침을 스펙에 기록하고, 구현이 필요하면 후속 plan으로 분리
-- [ ] `scripts/CLAUDE.md`의 메타데이터 지원 타입 목록 갱신
+- [x] 스펙 §0 "구현 시 실측 검증할 것" 항목에 게이트별 결과(값·근거·측정 일자)를 기록
+- [x] 게이트 실패 항목이 있으면 대응 방침을 스펙에 기록하고, 구현이 필요하면 후속 plan으로 분리 — 게이트 1·2·3 모두 통과/확정이라 후속 plan 불필요. 다만 KRX 로그인 필수 요건을 스펙 §0에 기록했다.
+- [x] `scripts/CLAUDE.md`의 메타데이터 지원 타입 목록 갱신
 
 ---
 
@@ -166,15 +166,15 @@
 
 **작업 내용**
 
-- [ ] 필요한 문서 업데이트 (README.md: 변경 없음 / `docs/COMMANDS.md`: 변경 있음)
-- [ ] `poetry run black .` 실행(자동 포맷 적용)
-- [ ] 변경 기능 및 전체 플로우 최종 검증
-- [ ] DoD 체크리스트 최종 업데이트 및 체크 완료
-- [ ] 전체 Phase 체크리스트 최종 업데이트 및 상태 확정
+- [x] 필요한 문서 업데이트 (README.md: 변경 없음 / `docs/COMMANDS.md`: 변경 있음)
+- [x] `poetry run black .` 실행(자동 포맷 적용)
+- [x] 변경 기능 및 전체 플로우 최종 검증
+- [x] DoD 체크리스트 최종 업데이트 및 체크 완료
+- [x] 전체 Phase 체크리스트 최종 업데이트 및 상태 확정
 
 **Validation**:
 
-- [ ] `poetry run python validate_project.py` (passed=\_\_, failed=\_\_, skipped=\_\_)
+- [x] `poetry run python validate_project.py` (passed=31, failed=0, skipped=0)
 
 #### Commit Messages (Final candidates) — 5개 중 1개 선택
 
@@ -204,3 +204,8 @@
 - 2026-07-27 09:18: plan 작성 (ROADMAP Phase 0 완료 대기 중 선작성). 실행 환경(Python 3.12·Poetry) 설치는 사용자 진행.
 - 2026-07-27 09:30: 환경 설치 완료 후 설치 버전 확인 중 부가 실측 항목이 일부 관측됨. 설치 버전은 **pykrx 1.2.8**이며, `import pykrx` 시점에 `KRX 로그인 실패: KRX_ID 또는 KRX_PW 환경 변수가 설정되지 않았습니다.` 메시지가 출력된다. 이 메시지가 실제 조회를 차단하는지는 미확정 → Phase 2 스팟체크에서 조회 성공 여부와 함께 판정한다.
 - 2026-07-27 09:30: 실행 환경의 Python 3.12.13이 `_lzma` 확장 없이 빌드됨(빌드 시점에 xz 미설치). parquet(pyarrow 자체 코덱)·평문 CSV 경로에는 영향이 없으나, 재빌드 여부는 사용자 결정 사항으로 남긴다.
+- 2026-07-27 10:10: **최종 — plan 완료(Done).** 실측 결과를 스펙 §0에 반영, black 실행(14개 파일 변경 없음), validate passed=31/failed=0/skipped=0.
+- 2026-07-27 10:05: **2차 실행 결과 — 게이트 1·2·3 전부 확정.** 게이트 1 통과(2016-06-01 KOSPI 885종목에 117930 존재), 게이트 2 통과(adjusted True/False 모두 246행, 2016-01-04~2016-12-29), 게이트 3 **ALL에 코넥스 포함 확정**(ALL 2,786 = KOSPI 953 + KOSDAQ 1,704 + KONEX 129, 초과 129개가 KONEX와 정확히 일치·누락 0). 부가: 거래정지 패턴은 2024-01-02 KOSPI에서 거래량 0인 14종목이 모두 시가 0 → §8 판정 규칙 유효. 당일 스냅샷은 **장중(월요일 10:03 KST)에도 943종목이 반환**되어, 조회 성공 여부로 확정 판단이 불가함을 확인 → 증분 수집 실행 시각을 장 마감 이후로 고정해야 한다.
+- 2026-07-27 10:02: 계획서 Scope 밖 변경 2건. (1) `.env` 기반 자격증명 관리를 위해 `python-dotenv`를 의존성에 추가(`pyproject.toml`·`poetry.lock`) — 사용자 요청. (2) `[tool.black]`에 `extend-exclude = "^/reference/"` 추가 — `black .`이 열람 전용 `reference/`를 포맷하는 것을 막기 위함이며 Ruff의 `extend-exclude` 설정과 정합을 맞춘 것.
+- 2026-07-27 09:56: **1차 실행 결과 — 게이트 판정 이전에 인증에서 차단됨.** `get_market_ohlcv_by_ticker` 호출이 `Expecting value: line 1 column 1 (char 0)`(빈 응답 파싱 실패) 후 pykrx 내부 KeyError로 종료. 설치 소스 확인 결과 `pykrx/website/comm/webio.py`가 모듈 로드 시 `build_krx_session()`으로 인증 세션을 만들고 모든 `getJsonData.cmd` 요청이 이 세션을 사용하므로, `KRX_ID`/`KRX_PW` 미설정 시 전 조회가 실패한다. → 스펙 §0 "pykrx 최신 버전의 KRX 로그인 경고/차단 여부" 항목은 **차단됨(계정 필수)**으로 확정. 대응: 스크립트에 환경 변수 사전 검증(`_require_krx_credentials`)을 추가하고, `.gitignore`에 `.env`를 등록했다(퍼블릭 저장소 자격증명 유출 방지). 게이트 1·2·3은 계정 설정 후 재실행 필요.
+- 2026-07-27 09:50: Phase 0·1·2 작성 완료. 게이트 3에서 초과 티커의 정체를 확정하기 위해 `market="KONEX"` 조회 1회를 추가했다(계획 대비 확장). 게이트 표본·비교 일자·요청 지연 상수는 `common_constants.py`가 아니라 `gate_checks.py`에 두었다 — 공통 상수가 아니고 계획서 Scope 밖 파일 수정을 피하기 위함. 수집기용 지연 상수는 ROADMAP Phase 2에서 공통 상수로 승격을 검토한다.

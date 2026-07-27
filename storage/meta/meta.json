@@ -1,0 +1,20 @@
+{
+  "pykrx_gate": [
+    {
+      "pykrx_version": "1.2.8",
+      "gate1_present": true,
+      "gate1_total_count": 885,
+      "gate2_adjusted_rows": 246,
+      "gate2_raw_rows": 246,
+      "gate3_all_count": 2786,
+      "gate3_kospi_count": 953,
+      "gate3_kosdaq_count": 1704,
+      "gate3_konex_count": 129,
+      "gate3_extra_count": 129,
+      "gate3_konex_in_extra_count": 129,
+      "gate3_missing_count": 0,
+      "today_snapshot_count": 943,
+      "timestamp": "2026-07-27T10:03:44+09:00"
+    }
+  ]
+}

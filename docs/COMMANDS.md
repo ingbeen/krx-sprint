@@ -72,3 +72,23 @@ poetry run pytest tests/test_<모듈명>.py -v
 
 > 스크립트는 사용자만 직접 실행한다 (CLAUDE.md 스크립트 실행 규칙).
 > 수집 스크립트가 구현되면 이 섹션에 명령어를 추가한다.
+
+### KRX 로그인 설정 (수집 스크립트 실행 전 필수)
+
+pykrx는 모든 KRX 조회를 인증 세션으로 보낸다. 자격증명이 없으면 응답 본문이 비어 조회가 실패한다.
+[data.krx.co.kr](https://data.krx.co.kr) 계정을 만든 뒤 프로젝트 루트에 `.env`를 만들고 아래 두 항목을 채운다.
+
+```
+KRX_ID=<KRX 데이터포털 아이디>
+KRX_PW=<비밀번호>
+```
+
+> `.env`는 `.gitignore`에 등록돼 있어 커밋되지 않는다. 자격증명을 저장소에 포함하지 않는다.
+> 환경 변수를 직접 export 해도 동작하며, 이 경우 `.env`보다 우선한다.
+
+### 스팟체크
+
+```bash
+# pykrx 검증 게이트 스팟체크 (스펙 §3.3, KRX 실제 호출 약 10회)
+poetry run python scripts/data/check_pykrx_gates.py
+```
