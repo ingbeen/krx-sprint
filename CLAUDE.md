@@ -1,9 +1,8 @@
 # krx-sprint 프로젝트 가이드라인
 
-> CRITICAL: 특정 폴더의 파일을 분석하거나 작업할 때는
-> 반드시 해당 폴더에 위치한 `CLAUDE.md`를 먼저 읽고 참고해야 합니다.
-> 이는 필수 요구사항입니다. 루트 문서는 프로젝트 전반의 공통 규칙을 제공하며,
+> 루트 문서는 프로젝트 전반의 공통 규칙을 제공하며,
 > 각 폴더 문서는 해당 계층의 구체적인 맥락과 핵심 개념을 제공합니다.
+> 하위 폴더의 `CLAUDE.md`와 `.claude/rules/`는 해당 경로의 파일을 다룰 때 자동으로 로드됩니다.
 
 ## 문서 목적
 
@@ -67,12 +66,12 @@
 
 ---
 
-## 폴더별 CLAUDE.md 참고 규칙
-
-각 작업 전에 해당 폴더의 CLAUDE.md를 반드시 읽습니다.
+## 규칙 문서 구성
 
 - 공통 규칙: `CLAUDE.md`(루트)
-- 계층 규칙: `scripts/CLAUDE.md`(스크립트), `tests/CLAUDE.md`(테스트), `docs/CLAUDE.md`(문서/계획서)
+- 계층 규칙: `scripts/CLAUDE.md`(스크립트), `tests/CLAUDE.md`(테스트)
+- 경로별 규칙: `.claude/rules/`
+- 절차: `.claude/skills/`
 
 ---
 
@@ -86,9 +85,13 @@
 - 주석 수정
 - 로그 메시지 수정
 
-위 예외를 제외한 모든 변경은 먼저 [`docs/CLAUDE.md`](docs/CLAUDE.md)를 읽고 `docs/plans/`에 계획서를 작성해야 합니다.
+위 예외를 제외한 모든 변경은 `docs/plans/`에 계획서를 작성해야 합니다.
 
-계획서 작성 절차 및 품질 게이트: [`docs/CLAUDE.md`](docs/CLAUDE.md)에서 상세 내용 확인
+계획서 작성 절차 및 품질 게이트: `/plan` 스킬([.claude/skills/plan/SKILL.md](.claude/skills/plan/SKILL.md))이 SoT입니다.
+
+이 규칙은 하네스가 강제합니다 — `src/`·`scripts/`·`tests/` 아래 `*.py` 편집 시
+계획서가 선행되지 않으면 권한 프롬프트가 뜨고, Done 조건을 위반한 계획서는 저장이 차단됩니다
+(`.claude/hooks/`).
 
 ---
 
@@ -132,13 +135,17 @@ krx-sprint는 KRX(코스피+코스닥) 주도테마 대장주 단기매매 전�
 
 ```
 krx-sprint/
+├── .claude/                 # 하네스 설정 (규칙 강제 계층)
+│   ├── hooks/               # 계획서 게이트·불변조건 검사 훅
+│   ├── rules/               # 경로별 자동 로드 규칙
+│   └── skills/              # 절차 스킬 (계획서 작성 등)
 ├── src/krx_sprint/          # 비즈니스 로직 패키지
 │   ├── common_constants.py  # 공통 상수 (경로, 컬럼명, 수집 기간 등)
 │   └── utils/               # 공통 유틸리티 (로거, 포맷팅, CLI 헬퍼, 메타 관리)
 ├── scripts/                 # CLI 스크립트 (상세: scripts/CLAUDE.md)
 │   └── data/                # 수집·검증 스크립트
 ├── tests/                   # 테스트 코드 (상세: tests/CLAUDE.md)
-├── docs/                    # 프로젝트 문서 및 계획서 (상세: docs/CLAUDE.md)
+├── docs/                    # 프로젝트 문서 및 계획서
 │   ├── 데이터수집_스펙_v2.md  # 데이터 수집 설계 확정본 (SoT)
 │   ├── ROADMAP.md           # 구현 순서 및 진행 상태
 │   ├── COMMANDS.md          # 실행 명령어 단일 관리

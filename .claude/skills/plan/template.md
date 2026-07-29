@@ -1,7 +1,7 @@
 # Implementation Plan: [작업명/기능명]
 
-> 작성/운영 규칙(SoT): 반드시 [docs/CLAUDE.md](../CLAUDE.md)를 참고하세요.  
-> (이 템플릿을 수정하거나 새로운 양식의 계획서를 만들 때도 [docs/CLAUDE.md](../CLAUDE.md)를 포인터로 두고 준수합니다.)
+> 작성/운영 규칙(SoT): `/plan` 스킬(`.claude/skills/plan/SKILL.md`)을 반드시 참고하세요.  
+> (이 템플릿을 수정하거나 새로운 양식의 계획서를 만들 때도 해당 스킬을 포인터로 두고 준수합니다.)
 
 **상태**: 🟡 Draft / 🔄 In Progress / ✅ Done
 
@@ -15,14 +15,15 @@
 
 - ✅ Done 조건: DoD 모두 [x] + `skipped=0` + `failed=0`
 - ⚠️ **스킵이 1개라도 존재하면 Done 처리 금지 + DoD 테스트 항목 체크 금지**
-- 상세: [docs/CLAUDE.md](../CLAUDE.md) 섹션 3, 5 참고
+- 상세: `/plan` 스킬의 "3) 스킵 및 완료 규칙" 참고
+- 위 조건은 `.claude/hooks/plan_lint.py`가 저장 시 자동 검사합니다
 
 ---
 
 **작성일**: YYYY-MM-DD HH:MM
 **마지막 업데이트**: YYYY-MM-DD HH:MM
-**관련 범위**: (예: backtest, tqqq, utils, scripts)
-**관련 문서**: (예: src/qbt/backtest/CLAUDE.md)
+**관련 범위**: (예: backtest, 수집, 검증, utils, scripts)
+**관련 문서**: (예: scripts/CLAUDE.md, tests/CLAUDE.md)
 
 ---
 
@@ -30,7 +31,7 @@
 
 > 🚫 **이 영역은 삭제/수정 금지** 🚫
 > 이 섹션(0)은 지워지면 안 될 뿐만 아니라 **문구가 수정되면 안 됩니다.**
-> 규칙의 상세 정의/예외는 반드시 [docs/CLAUDE.md](../CLAUDE.md)를 따릅니다.
+> 규칙의 상세 정의/예외는 반드시 `/plan` 스킬을 따릅니다.
 
 - `poetry run python validate_project.py`는 **마지막 Phase에서만 실행**한다. 실패하면 즉시 수정 후 재검증한다.
 - Phase 0은 "레드(의도적 실패 테스트)" 허용, Phase 1부터는 **그린 유지**를 원칙으로 한다.
@@ -60,12 +61,12 @@
 
 > 아래 문서에 기재된 규칙을 **모두 숙지**하고 준수합니다.
 
-- 작업 도메인 `CLAUDE.md`: `src/qbt/<domain>/CLAUDE.md` 또는 `scripts/CLAUDE.md` 등
+- 작업 도메인 규칙: `scripts/CLAUDE.md` 등
 - 테스트를 추가/수정한다면 `tests/CLAUDE.md`
 
 ## 4) 완료 조건(Definition of Done)
 
-> Done은 “서술”이 아니라 “체크리스트 상태”로만 판단합니다. (정의/예외는 docs/CLAUDE.md)
+> Done은 "서술"이 아니라 "체크리스트 상태"로만 판단합니다. (정의/예외는 `/plan` 스킬)
 
 - [ ] 기능 요구사항 충족
 - [ ] 회귀/신규 테스트 추가
@@ -78,7 +79,7 @@
 
 ### 변경 대상 파일(예상)
 
-- (예) `src/qbt/...`
+- (예) `src/krx_sprint/...`
 - (예) `tests/...`
 - (예) `docs/...`
 - `README.md`: (변경 있음 / 없음 — 반드시 명시)
@@ -96,7 +97,7 @@
 > 아래 조건 중 하나라도 해당하면 이 Phase를 만든다:
 >
 > - 핵심 인바리언트/정합성(절대 규칙/정의/중요 로직)의 변경 또는 추가
-> - 최종 결과(지표/정의/산식/판 판단 기준)가 달라질 수 있는 변경
+> - 최종 결과(지표/정의/산식/판단 기준)가 달라질 수 있는 변경
 > - 에러 처리 정책 변경(중단 조건/예외 조건/실패 규칙 변경 등)
 
 **작업 내용**:
@@ -137,7 +138,7 @@
 
 **Validation**:
 
-- [ ] `poetry run python validate_project.py` (passed=**, failed=**, skipped=\_\_)
+- [ ] `poetry run python validate_project.py` (passed=\_\_, failed=\_\_, skipped=\_\_)
 
 #### Commit Messages (Final candidates) — 5개 중 1개 선택
 

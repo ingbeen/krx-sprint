@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/plan_gate.py\"",
+            "timeout": 10,
+            "statusMessage": "계획서 선행 검사"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/plan_lint.py\"",
+            "timeout": 10,
+            "statusMessage": "계획서 불변조건 검사"
+          }
+        ]
+      }
+    ]
+  }
+}
