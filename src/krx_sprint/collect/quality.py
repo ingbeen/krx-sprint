@@ -112,6 +112,29 @@ ANCHORS = (
         shares=5969782550,
         market_cap=495491951650000,
     ),
+    # 외부 시세(Yahoo Finance)와 OHLC·거래량까지 완전 일치를 확인한 구간
+    AnchorRecord(
+        target=date(2026, 7, 24),
+        ticker="005930",
+        close=249500,
+        shares=5846278608,
+        market_cap=1458646512696000,
+    ),
+    AnchorRecord(
+        target=date(2026, 7, 27),
+        ticker="005930",
+        close=254000,
+        shares=5846278608,
+        market_cap=1484954766432000,
+    ),
+    # 액면분할(5:1) 직후. 분할 후 주식수가 DART 공시(5,090,828 → 25,454,140)와 일치함을 확인
+    AnchorRecord(
+        target=date(2026, 7, 27),
+        ticker="025560",
+        close=10210,
+        shares=25454140,
+        market_cap=259886769400,
+    ),
 )
 
 

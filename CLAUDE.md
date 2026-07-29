@@ -140,7 +140,6 @@ krx-sprint/
 ├── tests/                   # 테스트 코드 (상세: tests/CLAUDE.md)
 ├── docs/                    # 프로젝트 문서 및 계획서 (상세: docs/CLAUDE.md)
 │   ├── 데이터수집_스펙_v2.md  # 데이터 수집 설계 확정본 (SoT)
-│   ├── 데이터검증_가이드.md   # 수집 데이터 수기 검증 절차
 │   ├── ROADMAP.md           # 구현 순서 및 진행 상태
 │   ├── COMMANDS.md          # 실행 명령어 단일 관리
 │   └── plans/               # 작업 계획서 저장소

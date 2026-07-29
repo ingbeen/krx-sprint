@@ -24,8 +24,16 @@ venv/
 .env.*
 
 # 파생 캐시 (언제든 재생성 가능, 스펙 §7.2)
-# storage 의 나머지 하위 폴더(snapshots/adjusted/meta)는 git 으로 동기화하므로 제외하지 않는다
 storage/cache/
+
+# 백테스트 실행 결과 (실행마다 쌓이며 언제든 재생성 가능)
+storage/backtest/
+
+# 2단 수정주가 (1단 스냅샷만 있으면 언제든 재수집 가능한 로컬 자산, 스펙 §7.2)
+# 분할·증자가 발생하면 과거 전체가 재계산돼 파일이 통째로 다시 쓰이므로 git 히스토리에 담지 않는다
+storage/adjusted/
+
+# storage 의 나머지 하위 폴더(snapshots/meta)는 git 으로 동기화하므로 제외하지 않는다
 
 # 실행 로그 (수집 스크립트 출력 보관용, 동기화 대상 아님)
 logs/

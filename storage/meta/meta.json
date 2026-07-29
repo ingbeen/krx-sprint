@@ -20,6 +20,16 @@
   "snapshot_backfill": [
     {
       "start_date": "2019-01-01",
+      "last_date": "2026-07-27",
+      "target_count": 1,
+      "collected_count": 1,
+      "holiday_count": 0,
+      "failure_count": 0,
+      "name_count": 2765,
+      "timestamp": "2026-07-28T09:29:31+09:00"
+    },
+    {
+      "start_date": "2019-01-01",
       "last_date": "2026-07-26",
       "target_count": 10,
       "collected_count": 10,
@@ -61,12 +71,159 @@
   ],
   "snapshot_quality": [
     {
+      "date_count": 1857,
+      "row_count": 4702643,
+      "error_count": 0,
+      "warning_count": 3790,
+      "info_count": 360,
+      "timestamp": "2026-07-28T13:36:24+09:00"
+    },
+    {
       "date_count": 1856,
       "row_count": 4699878,
       "error_count": 0,
       "warning_count": 445,
       "info_count": 360,
       "timestamp": "2026-07-27T14:37:25+09:00"
+    }
+  ],
+  "adjusted_backfill": [
+    {
+      "start_date": "2019-01-01",
+      "last_date": "2026-07-27",
+      "universe_count": 3136,
+      "target_count": 3136,
+      "collected_count": 3136,
+      "failure_count": 0,
+      "timestamp": "2026-07-28T17:35:25+09:00"
+    },
+    {
+      "start_date": "2019-01-01",
+      "last_date": "2026-07-27",
+      "universe_count": 3136,
+      "target_count": 5,
+      "collected_count": 5,
+      "failure_count": 0,
+      "timestamp": "2026-07-28T09:31:12+09:00"
+    },
+    {
+      "start_date": "2019-01-01",
+      "last_date": "2026-07-24",
+      "universe_count": 3135,
+      "target_count": 3116,
+      "collected_count": 3116,
+      "failure_count": 0,
+      "timestamp": "2026-07-27T19:04:24+09:00"
+    },
+    {
+      "start_date": "2019-01-01",
+      "last_date": "2026-07-24",
+      "universe_count": 3135,
+      "target_count": 20,
+      "collected_count": 19,
+      "failure_count": 1,
+      "timestamp": "2026-07-27T17:43:27+09:00"
+    }
+  ],
+  "adjusted_quality": [
+    {
+      "universe_count": 3136,
+      "ticker_count": 3136,
+      "row_count": 4728694,
+      "error_count": 0,
+      "warning_count": 25,
+      "info_count": 0,
+      "timestamp": "2026-07-28T10:16:17+09:00"
+    },
+    {
+      "universe_count": 3136,
+      "ticker_count": 3136,
+      "row_count": 4728694,
+      "error_count": 0,
+      "warning_count": 25,
+      "info_count": 0,
+      "timestamp": "2026-07-28T10:13:13+09:00"
+    },
+    {
+      "universe_count": 3136,
+      "ticker_count": 3136,
+      "row_count": 4728694,
+      "error_count": 0,
+      "warning_count": 33,
+      "info_count": 0,
+      "timestamp": "2026-07-28T09:31:35+09:00"
+    },
+    {
+      "universe_count": 3135,
+      "ticker_count": 3135,
+      "row_count": 4728689,
+      "error_count": 4,
+      "warning_count": 33,
+      "info_count": 0,
+      "timestamp": "2026-07-28T08:46:42+09:00"
+    }
+  ],
+  "panel_build": [
+    {
+      "row_count": 4702643,
+      "ticker_count": 3136,
+      "year_count": 8,
+      "first_date": "2019-01-02",
+      "last_date": "2026-07-27",
+      "flag_is_halted": 169623,
+      "flag_no_regular_session": 11,
+      "flag_is_shares_jump": 3345,
+      "flag_is_unadjusted_action": 16,
+      "flag_is_limit_up_close": 10991,
+      "flag_is_limit_down_close": 1070,
+      "flag_is_last_seen": 3136,
+      "timestamp": "2026-07-28T18:17:27+09:00"
+    }
+  ],
+  "backtest_run": [
+    {
+      "start": "2023-01-01",
+      "end": "2026-07-27",
+      "label": "out-of-sample",
+      "trade_count": 823,
+      "total_return_pct": -35.14,
+      "max_drawdown_pct": -68.82,
+      "net_pnl": -3640900,
+      "output": "/Users/yubeen/Workspace/krx-sprint/storage/backtest/20260729_094227_out-of-sample",
+      "timestamp": "2026-07-29T09:42:27+09:00"
+    },
+    {
+      "start": "2019-01-01",
+      "end": "2022-12-31",
+      "label": "in-sample-nocost",
+      "trade_count": 868,
+      "total_return_pct": 123.3,
+      "max_drawdown_pct": -71.74,
+      "net_pnl": 12465330,
+      "output": "/Users/yubeen/Workspace/krx-sprint/storage/backtest/20260729_093058_in-sample-nocost",
+      "timestamp": "2026-07-29T09:30:58+09:00"
+    },
+    {
+      "start": "2019-01-01",
+      "end": "2022-12-31",
+      "label": "in-sample",
+      "trade_count": 868,
+      "total_return_pct": -18.5,
+      "max_drawdown_pct": -80.48,
+      "net_pnl": -1799612,
+      "output": "/Users/yubeen/Workspace/krx-sprint/storage/backtest/20260729_092634_in-sample",
+      "timestamp": "2026-07-29T09:26:34+09:00"
+    },
+    {
+      "start": "2019-06-03",
+      "end": "2019-12-31",
+      "label": "smoke",
+      "trade_count": 111,
+      "total_return_pct": 16.12,
+      "max_drawdown_pct": -31.24,
+      "net_pnl": 1490489,
+      "output": "/Users/yubeen/Workspace/krx-sprint/storage/backtest/20260729_092300_smoke",
+      "timestamp": "2026-07-29T09:23:00+09:00"
     }
   ]
 }

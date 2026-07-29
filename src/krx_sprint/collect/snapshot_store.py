@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from krx_sprint.common_constants import COL_CHANGE_RATE, SNAPSHOT_COLUMNS, SNAPSHOTS_DIR
+from krx_sprint.common_constants import COL_CHANGE_RATE, COL_TICKER, SNAPSHOT_COLUMNS, SNAPSHOTS_DIR
 
 # 파일명 일자 형식
 DATE_FORMAT = "%Y%m%d"
@@ -59,6 +59,54 @@ def list_collected_dates(base_dir: Path = SNAPSHOTS_DIR) -> set[date]:
             raise ValueError(f"스냅샷 파일명이 일자 규칙({DATE_FORMAT})에 맞지 않습니다: {path}") from error
 
     return collected
+
+
+def list_all_tickers(base_dir: Path = SNAPSHOTS_DIR) -> set[str]:
+    """저장된 모든 스냅샷의 티커 합집합을 반환한다.
+
+    일별 스냅샷의 합집합이 곧 유니버스다 — 그날 거래된 종목이 자동으로 포함되므로
+    이후 폐지된 종목도 폐지 전 데이터가 보존된다 (스펙 §3.2 생존편향 방지).
+
+    Args:
+        base_dir: 스냅샷 루트 디렉토리
+
+    Returns:
+        등장한 적 있는 모든 티커 (스냅샷이 없으면 빈 집합)
+
+    Raises:
+        ValueError: 저장된 컬럼이 스키마와 다른 경우
+    """
+    tickers: set[str] = set()
+    for target in sorted(list_collected_dates(base_dir=base_dir)):
+        snapshot = load_snapshot(target, base_dir=base_dir)
+        tickers.update(str(ticker) for ticker in snapshot[COL_TICKER])
+
+    return tickers
+
+
+def list_first_seen_dates(base_dir: Path = SNAPSHOTS_DIR) -> dict[str, date]:
+    """티커별 1단 최초 등장일을 반환한다.
+
+    2단 시계열은 1단이 제외한 시장(코넥스)의 이전상장 이력까지 담고 있고 그 구간은
+    가격 축이 다르다. 유니버스는 1단 스냅샷의 합집합으로 정의되므로(스펙 §3.2),
+    이 일자가 곧 **2단을 소비할 때 절단할 기준**이다.
+
+    Args:
+        base_dir: 스냅샷 루트 디렉토리
+
+    Returns:
+        티커 → 최초 등장 일자 (스냅샷이 없으면 빈 dict)
+
+    Raises:
+        ValueError: 저장된 컬럼이 스키마와 다른 경우
+    """
+    first_seen: dict[str, date] = {}
+    for target in sorted(list_collected_dates(base_dir=base_dir)):
+        snapshot = load_snapshot(target, base_dir=base_dir)
+        for ticker in snapshot[COL_TICKER]:
+            first_seen.setdefault(str(ticker), target)
+
+    return first_seen
 
 
 def load_snapshot(target: date, base_dir: Path = SNAPSHOTS_DIR) -> pd.DataFrame:

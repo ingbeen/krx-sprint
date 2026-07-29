@@ -17,7 +17,9 @@ from krx_sprint.collect.meta_store import (
     remove_failure,
 )
 from krx_sprint.collect.snapshot_store import (
+    list_all_tickers,
     list_collected_dates,
+    list_first_seen_dates,
     load_snapshot,
     save_snapshot,
     snapshot_path,
@@ -27,10 +29,10 @@ from krx_sprint.common_constants import SNAPSHOT_COLUMNS
 TARGET = date(2019, 1, 2)
 
 
-def _snapshot() -> pd.DataFrame:
+def _snapshot(ticker: str = "005930") -> pd.DataFrame:
     """저장용 최소 스냅샷을 만든다."""
     return pd.DataFrame(
-        [["005930", "KOSPI", 1000, 1100, 900, 1050, 500, 525000, 1.5, 10500000, 10000]],
+        [[ticker, "KOSPI", 1000, 1100, 900, 1050, 500, 525000, 1.5, 10500000, 10000]],
         columns=SNAPSHOT_COLUMNS,
     )
 
@@ -204,6 +206,115 @@ class TestListCollectedDates:
         # When / Then
         with pytest.raises(ValueError, match="파일명"):
             list_collected_dates(base_dir=tmp_path)
+
+
+class TestListAllTickers:
+    """생존편향 방지 유니버스(일별 스냅샷 합집합) 산출을 고정한다 (스펙 §3.2)."""
+
+    def test_returns_union_of_all_dates(self, tmp_path: Path):
+        """
+        목적: 여러 일자에 흩어진 티커를 합집합으로 모은다.
+
+        Given: 일자마다 다른 티커가 저장된 상태
+        When: list_all_tickers 호출
+        Then: 두 티커가 모두 반환된다
+        """
+        # Given
+        save_snapshot(_snapshot("005930"), date(2019, 1, 2), base_dir=tmp_path)
+        save_snapshot(_snapshot("000660"), date(2019, 1, 3), base_dir=tmp_path)
+
+        # When
+        result = list_all_tickers(base_dir=tmp_path)
+
+        # Then
+        assert result == {"005930", "000660"}
+
+    def test_includes_delisted_ticker(self, tmp_path: Path):
+        """
+        목적: 이후 일자에서 사라진 종목도 유니버스에 남는다 (생존편향 방지의 핵심).
+
+        Given: 첫날에만 등장하고 다음 날 사라진 티커
+        When: list_all_tickers 호출
+        Then: 사라진 티커가 여전히 포함된다
+        """
+        # Given
+        save_snapshot(_snapshot("117930"), date(2019, 1, 2), base_dir=tmp_path)
+        save_snapshot(_snapshot("005930"), date(2019, 1, 3), base_dir=tmp_path)
+
+        # When
+        result = list_all_tickers(base_dir=tmp_path)
+
+        # Then
+        assert "117930" in result
+
+    def test_returns_empty_for_missing_directory(self, tmp_path: Path):
+        """
+        목적: 저장 폴더가 없으면 빈 집합을 반환한다 (최초 실행, 경계 조건).
+
+        Given: 존재하지 않는 폴더
+        When: list_all_tickers 호출
+        Then: 빈 집합이다
+        """
+        # Given / When
+        result = list_all_tickers(base_dir=tmp_path / "없음")
+
+        # Then
+        assert result == set()
+
+
+class TestListFirstSeenDates:
+    """티커별 1단 최초 등장일 산출을 고정한다 (2단 유니버스 절단의 기준)."""
+
+    def test_returns_earliest_date_per_ticker(self, tmp_path: Path):
+        """
+        목적: 티커마다 가장 이른 등장 일자를 반환한다.
+
+        Given: 한 티커가 두 일자에, 다른 티커가 뒤 일자에만 등장한 상태
+        When: list_first_seen_dates 호출
+        Then: 각 티커의 최초 등장일이 반환된다
+        """
+        # Given
+        save_snapshot(_snapshot("005930"), date(2019, 1, 2), base_dir=tmp_path)
+        second = pd.concat([_snapshot("005930"), _snapshot("000660")], ignore_index=True)
+        save_snapshot(second, date(2019, 1, 3), base_dir=tmp_path)
+
+        # When
+        result = list_first_seen_dates(base_dir=tmp_path)
+
+        # Then
+        assert result == {"005930": date(2019, 1, 2), "000660": date(2019, 1, 3)}
+
+    def test_includes_delisted_ticker(self, tmp_path: Path):
+        """
+        목적: 이후 사라진 종목도 최초 등장일이 남는다 (생존편향 방지, 경계 조건).
+
+        Given: 첫날에만 등장하고 사라진 티커
+        When: list_first_seen_dates 호출
+        Then: 그 티커의 최초 등장일이 포함된다
+        """
+        # Given
+        save_snapshot(_snapshot("117930"), date(2019, 1, 2), base_dir=tmp_path)
+        save_snapshot(_snapshot("005930"), date(2019, 1, 3), base_dir=tmp_path)
+
+        # When
+        result = list_first_seen_dates(base_dir=tmp_path)
+
+        # Then
+        assert result["117930"] == date(2019, 1, 2)
+
+    def test_returns_empty_for_missing_directory(self, tmp_path: Path):
+        """
+        목적: 저장 폴더가 없으면 빈 결과를 반환한다 (최초 실행, 경계 조건).
+
+        Given: 존재하지 않는 폴더
+        When: list_first_seen_dates 호출
+        Then: 빈 dict이다
+        """
+        # Given / When
+        result = list_first_seen_dates(base_dir=tmp_path / "없음")
+
+        # Then
+        assert result == {}
 
 
 class TestMetaStore:

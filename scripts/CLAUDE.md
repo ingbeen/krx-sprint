@@ -49,7 +49,7 @@ CLI 스크립트 계층(`scripts/`)은 사용자 인터페이스를 제공하며
 - 자동 기록 항목: ISO 8601 타임스탬프 (KST), 실행 파라미터, 핵심 통계
 - 순환 저장: 최근 N개만 유지 (`MAX_HISTORY_COUNT`)
 - 저장 위치: `storage/meta/meta.json`
-- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크), `snapshot_backfill`(1단 스냅샷 수집), `snapshot_quality`(품질 검증 리포트). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
+- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크), `snapshot_backfill`(1단 스냅샷 수집), `snapshot_quality`(품질 검증 리포트), `adjusted_backfill`(2단 수정주가 수집), `adjusted_quality`(2단 정합성 리포트), `panel_build`(백테스트 통합 패널 빌드), `backtest_run`(백테스트 실행). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
 
 근거 위치: [src/krx_sprint/utils/meta_manager.py](../src/krx_sprint/utils/meta_manager.py), [src/krx_sprint/common_constants.py](../src/krx_sprint/common_constants.py)
 
@@ -114,6 +114,7 @@ main 함수:
 - 1단 스냅샷 백필/증분 수집 (스펙 §7.3 — 체크포인트·재시도·휴장 처리)
 - 2단 수정주가 수집 (스크리닝 통과 종목)
 - 품질 검증 리포트 (스펙 §8)
+- 백테스트 통합 패널 빌드 (백테스트 설계 §2 — 저장된 parquet만 읽는 파생 캐시 생성)
 
 구체 파일 목록은 변경 빈도가 높으므로 이 문서에 나열하지 않으며, 디렉토리를 직접 확인한다.
 실행 명령어는 [docs/COMMANDS.md](../docs/COMMANDS.md)에서 단일 관리한다.
@@ -145,6 +146,8 @@ main 함수:
   - 상수 명명 규칙: 루트 CLAUDE.md 참고
 - 예외를 두는 경우(수집 기간 지정 등)는 사유를 이 문서에 기록한다
   - `collect_snapshots.py --limit N`: 전체 백필은 두 시간 이상 걸려 한 번에 끝내기 어렵다. 실행 단위를 나누고 시범 수집 범위를 좁히기 위해 일자 수 상한만 인자로 받는다. 수집 시작일·시장 등 나머지 파라미터는 상수로 관리한다
+  - `collect_adjusted.py --limit N`: 전종목 수집은 한 시간 이상 걸린다. 같은 사유로 종목 수 상한만 인자로 받으며, 조회 구간은 상수(수집 시작일)와 1단 최종 수집 일자에서 자동으로 정한다
+  - `run_backtest.py --start/--end/--label/--no-cost`: 과최적화 방지를 위해 in-sample과 out-of-sample을 나눠 실행해야 하고, 무비용 대조군이 새니티 체크의 필수 항목이다(백테스트 설계 §10). 구간·라벨·비용 스위치만 인자로 받고 전략 파라미터는 `backtest/params.py`가 단일 관리한다
 
 ---
 
