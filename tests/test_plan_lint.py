@@ -311,3 +311,97 @@ class TestGatedPaths:
         Then: False 를 반환한다
         """
         assert hook.is_gated(rel_path) is False
+
+
+class TestPlansReferenced:
+    """Bash 명령문에서 검사 대상 계획서를 추출하는 계약."""
+
+    @pytest.fixture
+    def plan_dir(self, tmp_path: Path) -> Path:
+        """계획서 2건이 들어 있는 임시 프로젝트 루트를 만듭니다."""
+        directory = tmp_path / "docs" / "plans"
+        directory.mkdir(parents=True)
+        (directory / "PLAN_alpha.md").write_text("본문", encoding="utf-8")
+        (directory / "PLAN_beta.md").write_text("본문", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sed -i '' 's/a/b/' docs/plans/PLAN_alpha.md",
+            "cat > docs/plans/PLAN_alpha.md <<EOF\n내용\nEOF",
+            'python3 - <<PY\nPath("docs/plans/PLAN_alpha.md").write_text("x")\nPY',
+        ],
+    )
+    def test_명령문이_언급한_계획서를_찾는다(self, hook: ModuleType, plan_dir: Path, command: str) -> None:
+        """
+        목적: Bash 우회(sed/cat/heredoc)로 수정되는 계획서를 검사 대상으로 잡는 계약을 고정
+
+        Given: 계획서 파일명을 포함한 Bash 명령문
+        When: plans_referenced 실행
+        Then: 해당 계획서 경로 1건을 반환한다
+        """
+        # When
+        result = hook.plans_referenced(command, str(plan_dir))
+
+        # Then
+        assert [p.name for p in result] == ["PLAN_alpha.md"]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ls docs/plans/",
+            "git status",
+            "poetry run pytest tests/",
+            "",
+        ],
+    )
+    def test_계획서를_언급하지_않는_명령은_빈_목록(self, hook: ModuleType, plan_dir: Path, command: str) -> None:
+        """
+        목적: 무관한 명령이 기존 위반 계획서 때문에 차단되지 않는 계약을 고정
+              (계획서 폴더 전수 검사를 하지 않는다는 설계 결정의 회귀 방지)
+
+        Given: 계획서 파일명이 등장하지 않는 Bash 명령문
+        When: plans_referenced 실행
+        Then: 빈 목록을 반환한다
+        """
+        assert hook.plans_referenced(command, str(plan_dir)) == []
+
+    def test_존재하지_않는_계획서는_제외(self, hook: ModuleType, plan_dir: Path) -> None:
+        """
+        목적: 파일명만 등장하고 실체가 없는 경우를 걸러내는 계약을 고정
+
+        Given: 실재하지 않는 계획서를 언급한 명령문
+        When: plans_referenced 실행
+        Then: 빈 목록을 반환한다
+        """
+        assert hook.plans_referenced("cat docs/plans/PLAN_nope.md", str(plan_dir)) == []
+
+    def test_여러_계획서를_중복없이_수집(self, hook: ModuleType, plan_dir: Path) -> None:
+        """
+        목적: 한 명령이 여러 계획서를 건드릴 때 모두 검사하고 중복은 제거하는 계약을 고정
+
+        Given: 두 계획서를 언급하고 그중 하나가 두 번 등장하는 명령문
+        When: plans_referenced 실행
+        Then: 중복 없이 2건을 반환한다
+        """
+        # Given
+        command = (
+            "cp docs/plans/PLAN_alpha.md /tmp/x && sed -i '' s/a/b/ docs/plans/PLAN_alpha.md docs/plans/PLAN_beta.md"
+        )
+
+        # When
+        result = hook.plans_referenced(command, str(plan_dir))
+
+        # Then
+        assert [p.name for p in result] == ["PLAN_alpha.md", "PLAN_beta.md"]
+
+    def test_cwd가_비면_빈_목록(self, hook: ModuleType) -> None:
+        """
+        목적: 작업 디렉토리를 알 수 없을 때 안전하게 통과시키는 계약을 고정
+
+        Given: cwd 가 빈 문자열
+        When: plans_referenced 실행
+        Then: 빈 목록을 반환한다
+        """
+        assert hook.plans_referenced("sed -i '' s/a/b/ docs/plans/PLAN_alpha.md", "") == []

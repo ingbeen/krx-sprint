@@ -5,8 +5,13 @@
 계획서(`docs/plans/PLAN_*.md`)가 저장될 때 Done 처리 규칙을 기계적으로 검사하고,
 위반 시 `decision: block`으로 되돌린다. 프롬프트 수준의 경고를 대체하는 결정적 게이트다.
 
+Edit/Write 뿐 아니라 Bash 를 통한 수정(`sed -i`, `cat >`, heredoc 등)도 검사한다.
+Bash 는 편집 대상 파일을 입력으로 주지 않으므로, 명령문에 실제로 등장한 계획서 파일명만
+골라 검사한다. 무관한 명령이 기존 위반 파일 때문에 차단되는 것을 막기 위함이다.
+
 동시에 `plan_gate.py`가 참조하는 세션 마커를 기록한다. 마커는 "이번 세션에서
 계획서 활동이 있었거나, 게이트 대상 파일 편집이 이미 승인됐다"는 사실을 나타낸다.
+Bash 경로에서는 읽기와 쓰기를 구분할 수 없으므로 마커를 남기지 않는다.
 
 입력: PostToolUse 훅 JSON (stdin)
 출력: 위반 시 `{"decision": "block", "reason": ...}` (stdout), 정상 시 무출력
@@ -20,9 +25,13 @@ import tempfile
 from pathlib import Path
 
 # 계획서 경로 및 게이트 대상 경로 (프로젝트 루트 기준 상대경로)
+PLAN_DIR = "docs/plans"
 PLAN_PREFIX = "docs/plans/PLAN_"
 GATED_DIRS = ("src/", "scripts/", "tests/")
 GATED_SUFFIX = ".py"
+
+# Bash 명령문에서 계획서 파일명을 뽑아내는 패턴
+PLAN_TOKEN = re.compile(r"PLAN_[A-Za-z0-9_.-]*\.md")
 
 # 계획서 본문 판정용 패턴
 STATUS_PREFIX = "**상태**:"
@@ -143,6 +152,32 @@ def is_gated(rel_path: str) -> bool:
     return rel_path.endswith(GATED_SUFFIX) and rel_path.startswith(GATED_DIRS)
 
 
+def plans_referenced(command: str, cwd: str) -> list[Path]:
+    """
+    Bash 명령문이 실제로 언급한 계획서 파일 경로를 수집합니다.
+
+    명령문에 파일명이 등장하지 않으면 빈 목록을 반환합니다. 계획서 폴더를 전수 검사하면
+    `ls docs/plans/` 같은 무관한 명령까지 기존 위반 때문에 차단되므로, 언급된 파일만 봅니다.
+
+    Args:
+        command: Bash 툴에 전달된 명령문
+        cwd: 훅 입력의 작업 디렉토리
+
+    Returns:
+        list[Path]: 실재하는 계획서 파일 경로 (중복 제거, 정렬)
+    """
+    if not command or not cwd:
+        return []
+
+    plan_dir = Path(cwd) / PLAN_DIR
+    found: set[Path] = set()
+    for name in PLAN_TOKEN.findall(command):
+        candidate = plan_dir / name
+        if candidate.is_file():
+            found.add(candidate)
+    return sorted(found)
+
+
 def touch_marker(session_id: str) -> None:
     """
     게이트 통과 마커를 기록합니다. 실패해도 훅 전체를 중단시키지 않습니다.
@@ -160,6 +195,35 @@ def touch_marker(session_id: str) -> None:
         pass
 
 
+def lint_file(path: Path) -> list[str]:
+    """
+    계획서 파일 하나를 검사하고 파일명이 붙은 위반 목록을 반환합니다.
+
+    Args:
+        path: 계획서 파일 경로
+
+    Returns:
+        list[str]: `파일명: 위반내용` 형식의 목록. 읽기 실패 시 빈 목록
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [f"{path.name}: {item}" for item in check_plan(text)]
+
+
+def emit_block(violations: list[str]) -> None:
+    """
+    차단 결정을 stdout에 JSON으로 출력합니다.
+
+    Args:
+        violations: 위반 메시지 목록 (비어 있지 않아야 함)
+    """
+    # Bash 읽기 명령으로도 발동할 수 있으므로 "다시 저장하라"고 단정하지 않는다
+    reason = "계획서 불변조건 위반 — 아래 항목을 수정해야 합니다.\n" + "\n".join(f"- {item}" for item in violations)
+    json.dump({"decision": "block", "reason": reason}, sys.stdout, ensure_ascii=False)
+
+
 def main() -> int:
     """
     훅 진입점: stdin JSON을 읽어 계획서를 검사하고 마커를 기록합니다.
@@ -172,10 +236,20 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0
 
+    cwd = str(payload.get("cwd") or "")
     session_id = str(payload.get("session_id") or "")
     tool_input = payload.get("tool_input") or {}
-    rel_path = relative_path(str(tool_input.get("file_path") or ""), str(payload.get("cwd") or ""))
 
+    # Bash 경로: 명령문이 실제로 언급한 계획서만 검사한다. 읽기/쓰기를 구분할 수 없어 마커는 남기지 않는다
+    command = str(tool_input.get("command") or "")
+    if command:
+        violations = [item for path in plans_referenced(command, cwd) for item in lint_file(path)]
+        if violations:
+            emit_block(violations)
+        return 0
+
+    # Edit/Write 경로
+    rel_path = relative_path(str(tool_input.get("file_path") or ""), cwd)
     if rel_path is None:
         return 0
 
@@ -190,17 +264,9 @@ def main() -> int:
     # 계획서 활동이 있었으므로 이후 코드 편집은 게이트를 통과시킨다
     touch_marker(session_id)
 
-    try:
-        text = Path(str(tool_input.get("file_path"))).read_text(encoding="utf-8")
-    except OSError:
-        return 0
-
-    violations = check_plan(text)
-    if not violations:
-        return 0
-
-    reason = "계획서 불변조건 위반 — 아래 항목을 수정한 뒤 다시 저장하세요.\n" + "\n".join(f"- {item}" for item in violations)
-    json.dump({"decision": "block", "reason": reason}, sys.stdout, ensure_ascii=False)
+    violations = lint_file(Path(str(tool_input.get("file_path"))))
+    if violations:
+        emit_block(violations)
     return 0
 
 
