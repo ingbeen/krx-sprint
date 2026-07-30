@@ -72,7 +72,9 @@
 - [ ] 회귀/신규 테스트 추가
 - [ ] `poetry run python validate_project.py` 통과 (failed=0, skipped=0; passed/failed/skipped 수 기록)
 - [ ] `poetry run black .` 실행 완료 (마지막 Phase에서 자동 포맷 적용)
-- [ ] 필요한 문서 업데이트(README.md / `docs/COMMANDS.md` / CLAUDE.md / plan 등 — 각각 변경 여부 명시)
+- [ ] 필요한 문서 업데이트(`docs/COMMANDS.md` / CLAUDE.md / plan 등 — 각각 변경 여부 명시)
+- [ ] 근거 승격 완료 — 이 계획서를 지금 삭제해도 잃을 정보가 없다
+      (결정 근거·실측 수치를 스펙/설계/ROADMAP/COMMANDS로 이관. `/plan` 스킬 "근거 승격" 참고)
 - [ ] plan 체크박스 최신화(Phase/DoD/Validation 모두 반영)
 
 ## 5) 변경 범위(Scope)
@@ -82,7 +84,6 @@
 - (예) `src/krx_sprint/...`
 - (예) `tests/...`
 - (예) `docs/...`
-- `README.md`: (변경 있음 / 없음 — 반드시 명시)
 - `docs/COMMANDS.md`: (변경 있음 / 없음 — 실행 명령어/CLI 옵션 변경 여부 기준, 반드시 명시)
 
 ### 데이터/결과 영향
@@ -130,7 +131,7 @@
 
 **작업 내용**
 
-- [ ] 필요한 문서 업데이트 (README.md / `docs/COMMANDS.md` 포함 여부 명시)
+- [ ] 필요한 문서 업데이트 (`docs/COMMANDS.md` 포함 여부 명시)
 - [ ] `poetry run black .` 실행(자동 포맷 적용)
 - [ ] 변경 기능 및 전체 플로우 최종 검증
 - [ ] DoD 체크리스트 최종 업데이트 및 체크 완료
