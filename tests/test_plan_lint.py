@@ -1,18 +1,23 @@
 """
-계획서 불변조건 검사 훅(`.claude/hooks/plan_lint.py`)의 판정 로직 테스트.
+계획서 게이트 훅(`.claude/hooks/plan_gate.py`, `plan_lint.py`)의 판정 로직 테스트.
 
 훅은 프로덕션 패키지가 아닌 하네스 설정이라 `src/`에 두지 않는다.
-따라서 `importlib`로 파일 경로에서 직접 로드해 순수 함수만 검증한다.
+따라서 순수 함수는 `importlib`로 파일 경로에서 직접 로드해 검증하고,
+출력·부작용(마커 파일)에 관한 계약은 훅을 subprocess로 실행해 검증한다.
 """
 
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-HOOK_PATH = Path(__file__).resolve().parents[1] / ".claude" / "hooks" / "plan_lint.py"
+HOOKS_DIR = Path(__file__).resolve().parents[1] / ".claude" / "hooks"
+HOOK_PATH = HOOKS_DIR / "plan_lint.py"
+GATE_PATH = HOOKS_DIR / "plan_gate.py"
 
 # 검사 대상이 되는 최소 계획서 골격 (고정 규칙 섹션 + 상태 줄)
 FIXED_RULES_SECTION = "## 0) 고정 규칙 (이 plan은 반드시 아래 규칙을 따른다)"
@@ -508,3 +513,205 @@ class TestPlansReferenced:
         Then: 빈 목록을 반환한다
         """
         assert hook.plans_referenced("sed -i '' s/a/b/ docs/plans/PLAN_alpha.md", "") == []
+
+
+# --- 통합 테스트: 훅을 subprocess 로 실행해 출력·부작용 계약을 검증한다 ---
+
+SESSION_ID = "pytest-session"
+
+# lint 를 통과하는 최소 계획서 (진행 중 상태, 고정 규칙 섹션 보유)
+VALID_PLAN = f"# Plan\n\n**상태**: 🔄 In Progress\n\n{FIXED_RULES_SECTION}\n\n- [ ] 할 일\n"
+
+# 고정 규칙 섹션이 없어 lint 에 걸리는 계획서
+INVALID_PLAN = "# Plan\n\n**상태**: 🔄 In Progress\n\n- [ ] 할 일\n"
+
+
+class HookRunner:
+    """훅을 subprocess 로 실행하고 마커 파일을 관측하는 테스트 헬퍼."""
+
+    def __init__(self, project: Path, tmpdir: Path) -> None:
+        """
+        Args:
+            project: 임시 프로젝트 루트 (`docs/plans/` 포함)
+            tmpdir: 훅의 `TMPDIR` 로 쓸 경로. 실제 마커 디렉토리를 오염시키지 않기 위함
+        """
+        self.project = project
+        self.tmpdir = tmpdir
+
+    @property
+    def marker(self) -> Path:
+        """훅이 기록할 세션 마커 경로."""
+        return self.tmpdir / "krx-sprint-plan-gate" / SESSION_ID
+
+    def run(self, hook_path: Path, tool_input: dict[str, str]) -> dict[str, object]:
+        """
+        훅을 실행하고 stdout JSON 을 파싱합니다.
+
+        Args:
+            hook_path: 실행할 훅 스크립트 경로
+            tool_input: 훅 입력의 `tool_input` 값
+
+        Returns:
+            dict[str, object]: 파싱된 출력. 무출력이면 빈 dict
+
+        Raises:
+            RuntimeError: 훅이 0이 아닌 코드로 종료한 경우
+        """
+        payload = {"session_id": SESSION_ID, "cwd": str(self.project), "tool_input": tool_input}
+        result = subprocess.run(
+            [sys.executable, str(hook_path)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            env={"TMPDIR": str(self.tmpdir), "PATH": "/usr/bin:/bin"},
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"내부 불변조건 위반: 훅이 비정상 종료했습니다 (stderr={result.stderr})")
+        return json.loads(result.stdout) if result.stdout.strip() else {}
+
+    def write_plan(self, name: str, body: str) -> Path:
+        """계획서 파일을 만들고 경로를 반환합니다."""
+        path = self.project / "docs" / "plans" / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+
+@pytest.fixture
+def runner(tmp_path: Path) -> HookRunner:
+    """`docs/plans/` 를 가진 임시 프로젝트와 격리된 TMPDIR 을 준비합니다."""
+    project = tmp_path / "project"
+    (project / "docs" / "plans").mkdir(parents=True)
+    (project / "src").mkdir()
+    marker_root = tmp_path / "tmpdir"
+    marker_root.mkdir()
+    return HookRunner(project, marker_root)
+
+
+class TestGateOutput:
+    """plan_gate 출력 계약."""
+
+    def test_모델용_컨텍스트를_함께_출력한다(self, runner: HookRunner) -> None:
+        """
+        목적: 사용자용 사유(permissionDecisionReason)만 내보내면 모델에게는 "거부됨" 신호만
+              전달돼 계획서 작성으로 넘어가지 않는다. 모델용 additionalContext 동반을 고정한다.
+
+        Given: 계획서 활동이 없는 세션에서 게이트 대상 파일 편집
+        When: plan_gate 실행
+        Then: ask 결정과 함께 사용자용·모델용 문구가 모두 담긴다
+        """
+        # When
+        out = runner.run(GATE_PATH, {"file_path": str(runner.project / "src" / "app.py")})
+
+        # Then
+        payload = out["hookSpecificOutput"]
+        assert isinstance(payload, dict)
+        assert payload["permissionDecision"] == "ask"
+        assert payload["permissionDecisionReason"]
+        assert "/plan" in str(payload["additionalContext"])
+
+    def test_마커가_있으면_통과한다(self, runner: HookRunner) -> None:
+        """
+        목적: 게이트가 세션당 한 번만 걸린다는 계약을 고정
+
+        Given: 세션 마커가 이미 존재
+        When: plan_gate 실행
+        Then: 아무것도 출력하지 않는다
+        """
+        # Given
+        runner.marker.parent.mkdir(parents=True)
+        runner.marker.touch()
+
+        # When / Then
+        assert runner.run(GATE_PATH, {"file_path": str(runner.project / "src" / "app.py")}) == {}
+
+    def test_규약_미채택_프로젝트에서는_무동작(self, tmp_path: Path) -> None:
+        """
+        목적: docs/plans/ 가 없는 프로젝트(예: 일반 Java 저장소)에서 게이트가 걸리지 않는 계약을 고정
+              전역 배치 시 다른 프로젝트를 방해하지 않기 위함이다.
+
+        Given: docs/plans/ 가 없는 작업 디렉토리
+        When: plan_gate 실행
+        Then: 아무것도 출력하지 않는다
+        """
+        # Given
+        bare = tmp_path / "java-repo"
+        bare.mkdir()
+        runner = HookRunner(bare, tmp_path / "t")
+        runner.tmpdir.mkdir()
+
+        # When / Then
+        assert runner.run(GATE_PATH, {"file_path": str(bare / "src/main/java/App.java")}) == {}
+
+
+class TestMarkerCondition:
+    """plan_lint 의 마커 기록 조건 — 검사를 통과한 계획서만 게이트를 열 수 있다."""
+
+    def test_정상_계획서는_마커를_남긴다(self, runner: HookRunner) -> None:
+        """
+        목적: 유효한 계획서 작성이 게이트를 통과시킨다는 계약을 고정
+
+        Given: lint 를 통과하는 계획서
+        When: plan_lint 실행
+        Then: 차단 없이 마커가 생성된다
+        """
+        # Given
+        path = runner.write_plan("PLAN_ok.md", VALID_PLAN)
+
+        # When
+        out = runner.run(HOOK_PATH, {"file_path": str(path)})
+
+        # Then
+        assert out == {}
+        assert runner.marker.is_file()
+
+    def test_위반_계획서는_마커를_남기지_않는다(self, runner: HookRunner) -> None:
+        """
+        목적: 차단된 계획서로 게이트가 열리면 "유효한 계획서 존재"라는 게이트 전제가 무너진다.
+              차단 시 마커를 남기지 않는다는 계약을 고정한다.
+
+        Given: 고정 규칙 섹션이 없어 lint 에 걸리는 계획서
+        When: plan_lint 실행
+        Then: block 결정이 나오고 마커는 생성되지 않는다
+        """
+        # Given
+        path = runner.write_plan("PLAN_bad.md", INVALID_PLAN)
+
+        # When
+        out = runner.run(HOOK_PATH, {"file_path": str(path)})
+
+        # Then
+        assert out["decision"] == "block"
+        assert not runner.marker.exists()
+
+    def test_게이트_대상_파일_편집은_마커를_남긴다(self, runner: HookRunner) -> None:
+        """
+        목적: 편집이 성사됐다는 것은 게이트를 통과했다는 뜻이므로 마커를 남긴다는 계약을 고정
+
+        Given: 게이트 대상 파일 경로
+        When: plan_lint 실행 (PostToolUse)
+        Then: 마커가 생성된다
+        """
+        # When
+        out = runner.run(HOOK_PATH, {"file_path": str(runner.project / "src" / "app.py")})
+
+        # Then
+        assert out == {}
+        assert runner.marker.is_file()
+
+    def test_Bash_경로는_마커를_남기지_않는다(self, runner: HookRunner) -> None:
+        """
+        목적: Bash 는 읽기와 쓰기를 구분할 수 없으므로, 조회만으로 게이트가 열리지 않는 계약을 고정
+
+        Given: 정상 계획서를 언급하는 Bash 명령
+        When: plan_lint 실행
+        Then: 차단도 없고 마커도 생기지 않는다
+        """
+        # Given
+        runner.write_plan("PLAN_ok.md", VALID_PLAN)
+
+        # When
+        out = runner.run(HOOK_PATH, {"command": "head -5 docs/plans/PLAN_ok.md"})
+
+        # Then
+        assert out == {}
+        assert not runner.marker.exists()

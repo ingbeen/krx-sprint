@@ -10,7 +10,8 @@ Bash 는 편집 대상 파일을 입력으로 주지 않으므로, 명령문에 
 골라 검사한다. 무관한 명령이 기존 위반 파일 때문에 차단되는 것을 막기 위함이다.
 
 동시에 `plan_gate.py`가 참조하는 세션 마커를 기록한다. 마커는 "이번 세션에서
-계획서 활동이 있었거나, 게이트 대상 파일 편집이 이미 승인됐다"는 사실을 나타낸다.
+검사를 통과한 계획서를 썼거나, 게이트 대상 파일 편집이 이미 승인됐다"는 사실을 나타낸다.
+검사에 걸린 계획서로는 마커를 남기지 않는다 — 그러면 게이트의 전제가 무너진다.
 Bash 경로에서는 읽기와 쓰기를 구분할 수 없으므로 마커를 남기지 않는다.
 
 입력: PostToolUse 훅 JSON (stdin)
@@ -295,12 +296,14 @@ def main() -> int:
     if not (rel_path.startswith(PLAN_PREFIX) and rel_path.endswith(".md")):
         return 0
 
-    # 계획서 활동이 있었으므로 이후 코드 편집은 게이트를 통과시킨다
-    touch_marker(session_id)
-
     violations = lint_file(Path(str(tool_input.get("file_path"))))
     if violations:
+        # 차단된 계획서로 게이트가 열리면 "유효한 계획서 존재"라는 전제가 무너진다
         emit_block(violations)
+        return 0
+
+    # 유효한 계획서를 썼으므로 이후 코드 편집은 게이트를 통과시킨다
+    touch_marker(session_id)
     return 0
 
 
