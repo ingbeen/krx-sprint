@@ -24,11 +24,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-# 계획서 경로 및 게이트 대상 경로 (프로젝트 루트 기준 상대경로)
+# 계획서 경로 (프로젝트 루트 기준 상대경로)
 PLAN_DIR = "docs/plans"
 PLAN_PREFIX = "docs/plans/PLAN_"
-GATED_DIRS = ("src/", "scripts/", "tests/")
-GATED_SUFFIX = ".py"
+
+# 게이트 제외 경로. 나머지는 언어·레이아웃과 무관하게 전부 대상이다.
+# 화이트리스트는 새 언어·빌드 파일이 생길 때 조용히 통과시켜 게이트 목적과 실패 방향이 반대다.
+# 문서를 제외하는 이유: 계획서가 `docs/plans/` 에 있어 게이트하면 순환이 생기고,
+# 규칙상 "코드 변경"에도 해당하지 않는다.
+EXCLUDED_DIRS = ("docs/",)
+EXCLUDED_SUFFIXES = (".md",)
 
 # Bash 명령문에서 계획서 파일명을 뽑아내는 패턴
 PLAN_TOKEN = re.compile(r"PLAN_[A-Za-z0-9_.-]*\.md")
@@ -143,13 +148,39 @@ def is_gated(rel_path: str) -> bool:
     """
     계획서 게이트의 감시 대상 파일인지 판정합니다.
 
+    제외 목록(문서·마크다운)과 프로젝트 밖 경로를 뺀 나머지가 전부 대상입니다.
+    게이트는 차단이 아니라 `ask` 이고 세션당 한 번만 걸리므로, 놓치는 것보다
+    넓게 잡는 편이 비용이 낮습니다.
+
     Args:
         rel_path: 프로젝트 루트 기준 상대경로
 
     Returns:
         bool: 감시 대상 여부
     """
-    return rel_path.endswith(GATED_SUFFIX) and rel_path.startswith(GATED_DIRS)
+    if rel_path.startswith("../"):
+        # 이 프로젝트 밖의 파일
+        return False
+    if rel_path.startswith(EXCLUDED_DIRS):
+        return False
+    return not rel_path.endswith(EXCLUDED_SUFFIXES)
+
+
+def project_uses_plans(cwd: str) -> bool:
+    """
+    이 프로젝트가 `docs/plans/` 계획서 규약을 채택했는지 판정합니다.
+
+    두 훅의 나머지 로직은 이 규약(경로·템플릿·Done 조건)을 전제로 하므로,
+    채택하지 않은 프로젝트에서는 아무 동작도 하지 않아야 합니다. 이 판정 덕분에
+    훅을 전역(`~/.claude/`)에 두어도 다른 언어의 프로젝트를 방해하지 않습니다.
+
+    Args:
+        cwd: 훅 입력의 작업 디렉토리
+
+    Returns:
+        bool: 규약 채택 여부
+    """
+    return bool(cwd) and (Path(cwd) / PLAN_DIR).is_dir()
 
 
 def plans_referenced(command: str, cwd: str) -> list[Path]:
@@ -237,6 +268,9 @@ def main() -> int:
         return 0
 
     cwd = str(payload.get("cwd") or "")
+    if not project_uses_plans(cwd):
+        return 0
+
     session_id = str(payload.get("session_id") or "")
     tool_input = payload.get("tool_input") or {}
 

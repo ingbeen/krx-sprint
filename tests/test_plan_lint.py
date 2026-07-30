@@ -272,7 +272,12 @@ class TestValidationCounts:
 
 
 class TestGatedPaths:
-    """계획서 게이트의 감시 대상 경로 판정."""
+    """
+    계획서 게이트의 감시 대상 경로 판정.
+
+    제외 목록 방식이다. 화이트리스트(확장자 나열)는 새 언어·빌드 파일이 생길 때
+    조용히 통과시켜 게이트 목적과 실패 방향이 반대이므로 쓰지 않는다.
+    """
 
     @pytest.mark.parametrize(
         "rel_path",
@@ -280,13 +285,55 @@ class TestGatedPaths:
             "src/krx_sprint/common_constants.py",
             "scripts/data/collect_snapshot.py",
             "tests/test_params.py",
+            "validate_project.py",
         ],
     )
-    def test_감시_대상_경로(self, hook: ModuleType, rel_path: str) -> None:
+    def test_파이썬_소스는_위치와_무관하게_대상(self, hook: ModuleType, rel_path: str) -> None:
         """
-        목적: src/·scripts/·tests/ 아래 .py 가 게이트 대상이라는 계약을 고정
+        목적: 특정 폴더 화이트리스트를 쓰지 않는다는 계약을 고정
+              (루트의 validate_project.py 도 대상이어야 한다)
 
-        Given: 감시 대상 상대경로
+        Given: 프로젝트 안의 파이썬 파일 경로
+        When: is_gated 실행
+        Then: True 를 반환한다
+        """
+        assert hook.is_gated(rel_path) is True
+
+    @pytest.mark.parametrize(
+        "rel_path",
+        [
+            "src/main/java/com/example/App.java",
+            "app/src/index.ts",
+            "internal/server/handler.go",
+        ],
+    )
+    def test_다른_언어_소스도_대상(self, hook: ModuleType, rel_path: str) -> None:
+        """
+        목적: 게이트가 언어·레이아웃에 종속되지 않는다는 계약을 고정
+              (전역 이동 시 Java/TypeScript 프로젝트에서도 동작해야 한다)
+
+        Given: 파이썬이 아닌 언어의 소스 경로
+        When: is_gated 실행
+        Then: True 를 반환한다
+        """
+        assert hook.is_gated(rel_path) is True
+
+    @pytest.mark.parametrize(
+        "rel_path",
+        [
+            "pyproject.toml",
+            "pom.xml",
+            "package.json",
+            "pyrightconfig.json",
+            ".claude/settings.json",
+        ],
+    )
+    def test_빌드_설정_파일도_대상(self, hook: ModuleType, rel_path: str) -> None:
+        """
+        목적: 의존성·타입체커·하네스 설정 변경도 게이트 대상이라는 계약을 고정
+              (영향도가 낮지 않은데 확장자 화이트리스트에서는 누락됐다)
+
+        Given: 빌드/설정 파일 경로
         When: is_gated 실행
         Then: True 를 반환한다
         """
@@ -296,21 +343,77 @@ class TestGatedPaths:
         "rel_path",
         [
             "docs/ROADMAP.md",
-            "scripts/CLAUDE.md",
+            "docs/plans/PLAN_foo.md",
+            "docs/데이터수집_스펙_v2.md",
             "README.md",
-            "validate_project.py",
-            "storage/snapshot/20260101.parquet",
+            "scripts/CLAUDE.md",
         ],
     )
-    def test_비감시_경로(self, hook: ModuleType, rel_path: str) -> None:
+    def test_문서는_제외(self, hook: ModuleType, rel_path: str) -> None:
         """
-        목적: 비코드 파일과 감시 폴더 밖 파일이 게이트에 걸리지 않는 계약을 고정
+        목적: 문서를 제외하는 계약을 고정
+              계획서가 docs/plans/ 에 있어 게이트하면 순환(계획서를 쓰려면 계획서가 필요)이 생기고,
+              규칙상 "코드 변경"에도 해당하지 않는다.
 
-        Given: 감시 대상이 아닌 상대경로
+        Given: 문서 경로
         When: is_gated 실행
         Then: False 를 반환한다
         """
         assert hook.is_gated(rel_path) is False
+
+    def test_프로젝트_밖_경로는_제외(self, hook: ModuleType) -> None:
+        """
+        목적: 작업 디렉토리 밖의 파일은 이 프로젝트의 규칙 대상이 아니라는 계약을 고정
+
+        Given: `../` 로 시작하는 상대경로
+        When: is_gated 실행
+        Then: False 를 반환한다
+        """
+        assert hook.is_gated("../other-project/main.py") is False
+
+
+class TestProjectUsesPlans:
+    """계획서 규약 채택 여부 판정 (전역 배치 시 다른 프로젝트를 방해하지 않기 위한 자기 게이팅)."""
+
+    def test_docs_plans_가_있으면_활성(self, hook: ModuleType, tmp_path: Path) -> None:
+        """
+        목적: 규약을 채택한 프로젝트에서 훅이 동작한다는 계약을 고정
+
+        Given: docs/plans/ 디렉토리가 있는 작업 디렉토리
+        When: project_uses_plans 실행
+        Then: True 를 반환한다
+        """
+        # Given
+        (tmp_path / "docs" / "plans").mkdir(parents=True)
+
+        # When / Then
+        assert hook.project_uses_plans(str(tmp_path)) is True
+
+    @pytest.mark.parametrize("subdir", ["", "docs"])
+    def test_docs_plans_가_없으면_비활성(self, hook: ModuleType, tmp_path: Path, subdir: str) -> None:
+        """
+        목적: 규약 미채택 프로젝트(예: 일반 Java 저장소)에서 무동작이라는 계약을 고정
+
+        Given: docs/plans/ 가 없는 작업 디렉토리
+        When: project_uses_plans 실행
+        Then: False 를 반환한다
+        """
+        # Given
+        if subdir:
+            (tmp_path / subdir).mkdir()
+
+        # When / Then
+        assert hook.project_uses_plans(str(tmp_path)) is False
+
+    def test_cwd가_비면_비활성(self, hook: ModuleType) -> None:
+        """
+        목적: 작업 디렉토리를 알 수 없을 때 안전하게 통과시키는 계약을 고정
+
+        Given: cwd 가 빈 문자열
+        When: project_uses_plans 실행
+        Then: False 를 반환한다
+        """
+        assert hook.project_uses_plans("") is False
 
 
 class TestPlansReferenced:
