@@ -177,12 +177,14 @@ class _Theme:
     Attributes:
         cluster: 클러스터 구성 종목
         leader: 대장주
+        strength_score: 급등일에 매겨진 강도 점수. 여러 테마가 살아 있을 때 우선순위가 된다
         base_bar_position: 기준봉의 행 위치
         base_bar_date: 기준봉 일자
     """
 
     cluster: tuple[str, ...]
     leader: str
+    strength_score: float
     base_bar_position: int
     base_bar_date: date
 
@@ -632,6 +634,10 @@ def _build_orders(
     클러스터를 그날 다시 요구하면 영원히 진입할 수 없다. 그래서 급등일에 잡은 테마를 기준봉
     유효기간 동안 들고 있다가, 하락 차수가 진입 구간에 들어오는 날 주문을 만든다.
 
+    **주문 수는 남은 슬롯 수를 넘지 않는다.** 슬롯보다 많이 만들어 두고 앞에서부터 채우면
+    무엇을 버릴지가 순회 순서로 정해진다 — 선택 기준 없이 후보를 버리는 셈이다. 강한 테마부터
+    평가해 슬롯이 차면 멈추는 방식이라야 "가장 강한 테마를 산다"가 성립한다.
+
     Args:
         panel: 통합 패널
         histories: 종목별 사전 계산 시계열
@@ -653,9 +659,16 @@ def _build_orders(
         return []
 
     held_clusters = {position.cluster for position in positions.values()}
+    available_slots = params.max_positions - len(positions)
     orders: list[Order] = []
 
-    for theme in list(themes.values()):
+    # 강도 내림차순 — 동점이면 대장주 티커로 순서를 고정해 실행이 재현되게 한다
+    ranked = sorted(themes.values(), key=lambda theme: (-theme.strength_score, theme.leader))
+
+    for theme in ranked:
+        if len(orders) >= available_slots:
+            break
+
         if theme.cluster in held_clusters or theme.leader in positions:
             continue
 
@@ -720,6 +733,7 @@ def _refresh_themes(
         themes[cluster.leader] = _Theme(
             cluster=cluster.tickers,
             leader=cluster.leader,
+            strength_score=cluster.strength_score,
             base_bar_position=base_position,
             base_bar_date=history.dates[base_position],
         )

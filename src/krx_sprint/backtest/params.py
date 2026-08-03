@@ -48,6 +48,8 @@ class StrategyParams:
         correlation_threshold: 동조화 판정 상관 임계 (비율)
         co_move_rate: 동반 급등 기준 등락률 (비율, 0.05 = 5%)
         min_cluster_size: 테마로 인정할 최소 클러스터 크기. 1이면 단독 급등이 테마가 된다
+        strength_top_k: 테마 강도의 거래대금 합산에 포함할 상위 종목 수.
+            전체를 더하면 잡주가 여럿 붙었다는 이유만으로 합계가 커진다
         use_residual_correlation: 시장 팩터를 제거한 잔차로 상관을 볼지 여부
         value_surge_multiple: 기준봉 거래대금 배수 (자기 과거 평균 대비)
         value_average_window: 기준봉 거래대금 평균 창 (거래일, 당일 제외)
@@ -73,7 +75,8 @@ class StrategyParams:
     correlation_window: int = 60
     correlation_threshold: float = 0.5
     co_move_rate: float = 0.05
-    min_cluster_size: int = 2
+    min_cluster_size: int = 4
+    strength_top_k: int = 5
     use_residual_correlation: bool = True
 
     # 기준봉 (설계 §5.1)
@@ -98,7 +101,7 @@ class StrategyParams:
 
     # 자금 (설계 §6.4)
     initial_equity: int = 10_000_000
-    max_positions: int = 3
+    max_positions: int = 1
 
     # 유니버스 게이트 (설계 §4.2)
     min_market_cap: int = 30_000_000_000
@@ -125,6 +128,9 @@ class StrategyParams:
 
         if self.min_cluster_size < 1:
             raise ValueError(f"min_cluster_size는 1 이상이어야 합니다: {self.min_cluster_size}")
+
+        if self.strength_top_k < 1:
+            raise ValueError(f"strength_top_k는 1 이상이어야 합니다: {self.strength_top_k}")
 
         if self.max_decline_count < 1:
             raise ValueError(f"max_decline_count는 1 이상이어야 합니다: {self.max_decline_count}")

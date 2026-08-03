@@ -13,10 +13,13 @@
 
 계산은 **당일 급등 종목 부분집합**에만 돌린다. 하루 수십 종목이라 상관 계산이 가볍고,
 전종목 상관행렬(약 2,500²)을 매일 돌리는 비용을 피한다.
+
+클러스터에는 **강도 점수**가 함께 붙는다. 하루에 여러 테마가 서므로 어느 쪽이 더 강한지를
+정하지 않으면 매매 대상 선택이 임의가 된다.
 """
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -43,10 +46,18 @@ class ThemeCluster:
     Attributes:
         tickers: 클러스터 구성 종목 (오름차순)
         leader: 대장주. 클러스터 안에서 당일 거래대금(원본가) 1위
+        top_value_sum: 거래대금 상위 K종목의 합 (원). 테마로 들어온 자금의 규모
+        mean_change_rate: 구성 종목 평균 등락률 (비율, 0.05 = 5%). 테마의 상승 강도
+        leader_value: 대장주 거래대금 (원). 1등주에 쏠린 자금
+        strength_score: 위 세 척도와 구성 종목 수를 합산한 강도 점수 (0~1)
     """
 
     tickers: tuple[str, ...]
     leader: str
+    top_value_sum: int
+    mean_change_rate: float
+    leader_value: int
+    strength_score: float
 
 
 def find_clusters(
@@ -69,7 +80,7 @@ def find_clusters(
             생략하면 `panel`에서 센다 — 이때 `panel`이 전체 이력이어야 값이 맞다
 
     Returns:
-        클러스터 (구성 종목 오름차순으로 정렬)
+        클러스터 (강도 점수 내림차순으로 정렬)
 
     Raises:
         ValueError: 패널에 신호일 데이터가 없는 경우
@@ -104,15 +115,111 @@ def find_clusters(
     correlation = returns[available].corr()
     components = _connected_components(available, correlation, params.correlation_threshold)
 
-    # 4. 대장주 = 당일 거래대금 1위
-    values = dict(zip(today[COL_TICKER].astype(str), today[COL_VALUE], strict=True))
-    clusters = [
-        ThemeCluster(tickers=tuple(sorted(component)), leader=max(component, key=lambda item: values[item]))
-        for component in components
-        if len(component) >= params.min_cluster_size
+    # 4. 대장주 = 당일 거래대금 1위, 그리고 테마 강도 점수
+    tickers = today[COL_TICKER].astype(str)
+    values = dict(zip(tickers, today[COL_VALUE], strict=True))
+    rates = dict(zip(tickers, today[COL_CHANGE_RATE], strict=True))
+    members = [tuple(sorted(component)) for component in components if len(component) >= params.min_cluster_size]
+
+    return _score_clusters(members, values, rates, params.strength_top_k)
+
+
+def _score_clusters(
+    members: Sequence[tuple[str, ...]],
+    values: Mapping[str, int],
+    rates: Mapping[str, float],
+    top_k: int,
+) -> tuple[ThemeCluster, ...]:
+    """클러스터에 강도 점수를 매겨 강한 순으로 정렬한다.
+
+    척도는 네 가지이며 **모두 같은 무게**로 더한다 — 상위 K종목 거래대금 합, 구성 종목 수,
+    평균 등락률, 대장주 거래대금. 어느 하나만 쓰면 편향이 남는다. 거래대금만 보면 대형주가 낀
+    테마가 늘 1위가 되고, 종목 수만 보면 동점이 과도하게 생긴다.
+
+    단위가 서로 달라(원·개·비율) 값을 그대로 더할 수 없으므로 **그날 클러스터들 사이의 등수를
+    0~1로 정규화**해서 더한다. 정규화에는 이유가 하나 더 있다. 클러스터 수는 날마다 다르므로
+    등수 점수를 그대로 쓰면 클러스터가 많은 날의 1위가 적은 날의 1위보다 높은 점수를 받는다.
+    0~1 정규화는 점수를 "그날 안에서의 상대 위치"로 만들어 **다른 날에 잡힌 테마끼리도 비교**할
+    수 있게 한다 — 엔진은 며칠 전에 잡은 테마를 들고 있다가 진입하므로 이 비교가 필요하다.
+
+    Args:
+        members: 클러스터별 구성 종목 (각각 오름차순)
+        values: 티커별 당일 거래대금 (원)
+        rates: 티커별 당일 등락률 (% 단위, 패널 원값)
+        top_k: 거래대금 합산에 포함할 상위 종목 수
+
+    Returns:
+        클러스터 (강도 점수 내림차순, 동점이면 구성 종목 오름차순)
+    """
+    if not members:
+        return ()
+
+    leaders = [max(tickers, key=lambda item: values[item]) for tickers in members]
+    top_sums = [_top_value_sum(tickers, values, top_k) for tickers in members]
+    leader_values = [int(values[leader]) for leader in leaders]
+    mean_rates = [
+        sum(float(rates[ticker]) for ticker in tickers) / len(tickers) / PERCENT_TO_RATE for tickers in members
     ]
 
-    return tuple(sorted(clusters, key=lambda cluster: cluster.tickers))
+    columns = [
+        _normalized_ranks([float(value) for value in top_sums]),
+        _normalized_ranks([float(len(tickers)) for tickers in members]),
+        _normalized_ranks(mean_rates),
+        _normalized_ranks([float(value) for value in leader_values]),
+    ]
+
+    clusters = [
+        ThemeCluster(
+            tickers=tickers,
+            leader=leaders[index],
+            top_value_sum=top_sums[index],
+            mean_change_rate=mean_rates[index],
+            leader_value=leader_values[index],
+            strength_score=sum(column[index] for column in columns) / len(columns),
+        )
+        for index, tickers in enumerate(members)
+    ]
+
+    return tuple(sorted(clusters, key=lambda cluster: (-cluster.strength_score, cluster.tickers)))
+
+
+def _top_value_sum(tickers: Sequence[str], values: Mapping[str, int], top_k: int) -> int:
+    """거래대금 상위 K종목만 더한다.
+
+    전체를 더하면 잡주가 여럿 붙었다는 이유만으로 합계가 커져 테마가 강해 보인다.
+
+    Args:
+        tickers: 클러스터 구성 종목
+        values: 티커별 당일 거래대금 (원)
+        top_k: 합산에 포함할 상위 종목 수
+
+    Returns:
+        상위 K종목의 거래대금 합 (원)
+    """
+    ranked = sorted((int(values[ticker]) for ticker in tickers), reverse=True)
+
+    return sum(ranked[:top_k])
+
+
+def _normalized_ranks(values: Sequence[float]) -> list[float]:
+    """값이 클수록 1에 가깝도록 등수를 0~1로 정규화한다.
+
+    동점은 같은 값을 받는다. 모든 값이 같으면 그 척도로는 우열을 가릴 수 없으므로 전부 1.0이며,
+    결과적으로 그 척도가 순위에 영향을 주지 않는다.
+
+    Args:
+        values: 정규화할 값 (클수록 강하다)
+
+    Returns:
+        같은 순서의 0~1 점수
+    """
+    unique = sorted(set(values))
+    if len(unique) == 1:
+        return [1.0] * len(values)
+
+    position = {value: index / (len(unique) - 1) for index, value in enumerate(unique)}
+
+    return [position[value] for value in values]
 
 
 def _apply_universe_gates(

@@ -88,6 +88,27 @@ class TestStrategyParams:
         with pytest.raises(ValueError, match="max_decline_count"):
             StrategyParams(max_decline_count=0)
 
+    def test_rejects_zero_strength_top_k(self):
+        """
+        목적: 강도 합산 대상이 0종목이면 거래대금 척도가 사라진다.
+
+        Given: strength_top_k=0
+        When: StrategyParams 생성
+        Then: ValueError
+        """
+        with pytest.raises(ValueError, match="strength_top_k"):
+            StrategyParams(strength_top_k=0)
+
+    def test_defaults_trade_one_position_at_a_time(self):
+        """
+        목적: 기본값은 **단일 슬롯**이다 — 가장 강한 테마 하나에 집중하는 것이 전략의 전제다.
+
+        Given: 기본 파라미터
+        When: 생성
+        Then: 동시 보유 상한이 1이다
+        """
+        assert StrategyParams().max_positions == 1
+
     def test_rejects_non_positive_equity(self):
         """
         목적: 초기 자본이 0 이하면 백테스트가 성립하지 않는다.

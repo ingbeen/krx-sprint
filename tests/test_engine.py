@@ -2,12 +2,14 @@
 
 일별 루프·포지션·자금 관리의 계약을 고정한다 (백테스트 설계 §6·§7).
 
-핵심 계약은 세 가지다.
+핵심 계약은 네 가지다.
 - 신호는 D일 종가까지로 만들고 **체결은 D+1 봉에서만** 일어난다 (look-ahead 금지)
 - 지표는 수정주가 축, 주문 가격은 원본가 축이다. 축 변환 계수는 신호일 값만 쓴다
 - 동시 보유 상한과 **같은 클러스터 중복 진입 금지**를 지킨다
+- 여러 테마가 후보면 **강도 1위부터** 사고, 주문 수는 남은 슬롯을 넘지 않는다
 """
 
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pandas as pd
@@ -134,6 +136,51 @@ def _run(closes: dict[str, list[int]], params: StrategyParams = PARAMS):
     return run_backtest(panel, _trading_days(40), params, EXECUTION)
 
 
+# 두 테마가 같은 날 서는 시나리오 — 초반 흔들림을 달리해 잔차 상관이 갈리게 한다.
+# 강한 쪽(STRONG)은 거래대금이 약한 쪽(WEAK)보다 크다
+STRONG_LEADER, STRONG_PEER = "000001", "000002"
+WEAK_LEADER, WEAK_PEER = "000003", "000004"
+MARKET = "000009"
+
+
+def _two_theme_closes() -> dict[str, list[int]]:
+    """두 테마가 각각 기준봉과 1차 하락을 만드는 종가열을 준다."""
+    tail = [1_100, 1_200]
+    strong = [1_000, 1_005, 995, 1_200, 1_100, 1_050, *tail]
+    weak = [1_000, 990, 1_010, 1_200, 1_090, 1_040, *tail]
+
+    return {
+        STRONG_LEADER: strong,
+        STRONG_PEER: strong,
+        WEAK_LEADER: weak,
+        WEAK_PEER: weak,
+        MARKET: [1_000] * len(strong),
+    }
+
+
+def _two_theme_values() -> dict[str, list[int]]:
+    """강한 테마 쪽 거래대금을 크게 준다 (강도 점수가 갈리게 한다)."""
+    base = [100_000_000] * 3 + [1_000_000_000] + [100_000_000] * 20
+    multiples = {STRONG_LEADER: 9, STRONG_PEER: 8, WEAK_LEADER: 2, WEAK_PEER: 1, MARKET: 1}
+
+    return {ticker: [value * multiple for value in base] for ticker, multiple in multiples.items()}
+
+
+def _run_two_themes(max_positions: int):
+    """두 테마 시나리오를 지정한 슬롯 수로 실행한다."""
+    params = replace(PARAMS, max_positions=max_positions)
+    panel = _panel(_two_theme_closes(), _two_theme_values())
+
+    return run_backtest(panel, _trading_days(40), params, EXECUTION)
+
+
+def _has_overlap(result) -> bool:
+    """보유 구간이 겹치는 트레이드 쌍이 있는지 본다."""
+    spans = sorted((trade.entry_date, trade.exit_date) for trade in result.trades)
+
+    return any(spans[index + 1][0] < spans[index][1] for index in range(len(spans) - 1))
+
+
 class TestEntryAndExit:
     """진입·청산 흐름을 고정한다."""
 
@@ -250,6 +297,59 @@ class TestCapitalAndSlots:
         for trade in result.trades:
             assert trade.net_pnl == trade.gross_pnl - trade.fee - trade.tax
             assert trade.tax > 0
+
+
+class TestThemeSelection:
+    """여러 테마 중 무엇을 살지의 계약을 고정한다."""
+
+    def test_strongest_theme_leader_is_bought(self):
+        """
+        목적: 슬롯이 하나면 **강도 1위 테마의 대장주**를 산다 — 선택과 집중이 전략의 전제다.
+
+        Given: 같은 날 두 테마가 서고 한쪽 거래대금이 크게 우위인 시나리오
+        When: 슬롯 1개로 run_backtest 실행
+        Then: 강한 테마의 대장주만 원장에 남는다
+        """
+        # Given / When
+        result = _run_two_themes(1)
+
+        # Then
+        assert result.trades
+        assert {trade.ticker for trade in result.trades} == {STRONG_LEADER}
+
+    def test_daily_orders_never_exceed_free_slots(self):
+        """
+        목적: 주문 수는 **남은 슬롯 수를 넘지 않는다** — 슬롯보다 많이 만들어 순회 순서로 버리면
+        무엇을 살지가 선택 기준 없이 정해진다.
+
+        Given: 두 테마가 동시에 후보가 되는 시나리오
+        When: 슬롯을 1개와 2개로 각각 실행
+        Then: 슬롯이 적을수록 주문이 적고, 슬롯 부족으로 버려진 주문이 없다
+        """
+        # Given / When
+        single = _run_two_themes(1)
+        double = _run_two_themes(2)
+
+        # Then
+        assert single.diagnostics.order_count < double.diagnostics.order_count
+        assert single.diagnostics.slot_blocked == 0
+        assert double.diagnostics.slot_blocked == 0
+
+    def test_single_slot_holds_one_position_at_a_time(self):
+        """
+        목적: 슬롯이 하나면 보유 구간이 겹치지 않는다 — 동시 보유 상한의 불변조건이다.
+
+        Given: 두 테마가 동시에 후보가 되는 시나리오 (슬롯 2개면 실제로 겹친다)
+        When: 슬롯을 1개와 2개로 각각 실행
+        Then: 1개일 때만 보유 구간이 겹치지 않는다
+        """
+        # Given / When
+        single = _run_two_themes(1)
+        double = _run_two_themes(2)
+
+        # Then
+        assert not _has_overlap(single)
+        assert _has_overlap(double)
 
 
 class TestGuards:
