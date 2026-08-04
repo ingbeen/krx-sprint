@@ -27,14 +27,19 @@ class StopLossKind(Enum):
     SWING_LOW = "스윙 전저점"
     MOVING_AVERAGE = "이동평균"
     FIXED = "고정 비율"
+    BAND_FLOOR = "밴드 하한선"
 
 
 class EntryPriceKind(Enum):
-    """매수 지정가 산정 방식 (설계 §6.1)"""
+    """매수 지정가 산정 방식 (설계 §6.1)
+
+    `MA_BAND_SPLIT`만 한 종목을 여러 번에 나눠 사고, 나머지는 한 번에 산다.
+    """
 
     CLOSE_DISCOUNT = "종가 대비 할인"
     MOVING_AVERAGE = "이동평균"
     PREVIOUS_LOW = "전일 저가"
+    MA_BAND_SPLIT = "이동평균 밴드 분할"
 
 
 @dataclass(frozen=True)
@@ -61,8 +66,10 @@ class StrategyParams:
         entry_price_kind: 매수 지정가 산정 방식
         entry_discount_rate: 종가 대비 할인 폭 (비율)
         entry_ma_period: 진입 지정가용 이동평균 기간 (거래일)
+        entry_band_periods: 밴드 분할 매수의 경계가 되는 이동평균 기간 (짧은 것부터).
+            이웃한 두 선 사이가 한 밴드이며, 가장 긴 선이 매수 하한이자 손절 기준선이다
         stop_loss_kind: 손절 방식
-        stop_loss_rate: 손절 폭 (비율). 고정 방식은 진입가 대비, 전저점 방식은 전저점 아래 여유
+        stop_loss_rate: 손절 폭 (비율). 고정 방식은 진입가 대비, 전저점·밴드 방식은 기준선 아래 여유
         stop_loss_ma_period: 손절용 이동평균 기간 (거래일)
         reward_risk_ratio: 손익비. 익절폭 = 손절폭 × 이 값
         initial_equity: 초기 자본 (원)
@@ -91,10 +98,11 @@ class StrategyParams:
     max_decline_count: int = 2
 
     # 진입·손절·익절 (설계 §6)
-    entry_price_kind: EntryPriceKind = EntryPriceKind.CLOSE_DISCOUNT
+    entry_price_kind: EntryPriceKind = EntryPriceKind.MA_BAND_SPLIT
     entry_discount_rate: float = 0.03
     entry_ma_period: int = 5
-    stop_loss_kind: StopLossKind = StopLossKind.FIXED
+    entry_band_periods: tuple[int, ...] = (5, 10, 20)
+    stop_loss_kind: StopLossKind = StopLossKind.BAND_FLOOR
     stop_loss_rate: float = 0.05
     stop_loss_ma_period: int = 5
     reward_risk_ratio: float = 1.5
@@ -132,6 +140,8 @@ class StrategyParams:
         if self.strength_top_k < 1:
             raise ValueError(f"strength_top_k는 1 이상이어야 합니다: {self.strength_top_k}")
 
+        self._require_ascending_band_periods()
+
         if self.max_decline_count < 1:
             raise ValueError(f"max_decline_count는 1 이상이어야 합니다: {self.max_decline_count}")
 
@@ -155,6 +165,26 @@ class StrategyParams:
 
         if self.min_listed_days < 0:
             raise ValueError(f"min_listed_days는 0 이상이어야 합니다: {self.min_listed_days}")
+
+    def _require_ascending_band_periods(self) -> None:
+        """밴드 경계 기간이 짧은 것부터 오름차순인지 확인한다.
+
+        밴드는 이웃한 두 선 사이의 구간이므로 경계가 최소 두 개 있어야 하고, 순서가 어긋나면
+        "짧은 선을 깨고 긴 선까지"라는 정의가 성립하지 않는다.
+
+        Raises:
+            ValueError: 경계가 둘 미만이거나 오름차순이 아닌 경우
+        """
+        periods = self.entry_band_periods
+
+        if len(periods) < 2:
+            raise ValueError(f"entry_band_periods는 두 개 이상이어야 합니다: {periods}")
+
+        if any(period <= 0 for period in periods):
+            raise ValueError(f"entry_band_periods는 모두 0보다 커야 합니다: {periods}")
+
+        if list(periods) != sorted(set(periods)):
+            raise ValueError(f"entry_band_periods는 중복 없이 오름차순이어야 합니다: {periods}")
 
     @staticmethod
     def _require_positive_window(name: str, value: int) -> None:

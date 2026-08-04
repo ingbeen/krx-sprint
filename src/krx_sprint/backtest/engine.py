@@ -32,7 +32,14 @@ from krx_sprint.backtest.execution import (
     resolve_exit,
 )
 from krx_sprint.backtest.params import EntryPriceKind, ExecutionParams, StopLossKind, StrategyParams
-from krx_sprint.backtest.signals import SwingKind, count_declines, find_confirmed_swings, mark_base_bars
+from krx_sprint.backtest.signals import (
+    SwingKind,
+    band_split_prices,
+    count_declines,
+    find_confirmed_swings,
+    mark_base_bars,
+    next_day_moving_average,
+)
 from krx_sprint.backtest.theme import find_clusters
 from krx_sprint.common_constants import (
     COL_ADJ_CLOSE,
@@ -52,48 +59,88 @@ from krx_sprint.common_constants import (
     COL_VALUE,
 )
 
+# 밴드 하나당 매수 지정가 개수. 파라미터로 두지 않는 이유는 탐색 공간을 넓히지 않기 위해서다 —
+# 흔들어 볼 필요가 생기면 그때 StrategyParams로 올린다
+ORDERS_PER_BAND = 2
+
 
 @dataclass(frozen=True)
 class Order:
     """다음 거래일에 낼 매수 예약 주문
+
+    한 주문이 지정가를 여러 개 담을 수 있다. 분할 매수는 "같은 종목을 여러 자리에서 나눠 산다"는
+    뜻이므로 종목당 주문은 하나이고 그 안에 자리가 여러 개다.
 
     Attributes:
         ticker: 대상 티커
         market: 시장 구분
         cluster: 근거가 된 클러스터 구성 종목
         signal_date: 신호를 낸 일자 (= 주문 가격의 근거 시점)
-        limit_price: 매수 지정가 (원본가, 호가 정렬 완료)
+        limit_prices: 매수 지정가 (원본가, 내림차순, 호가 정렬 완료)
+        slice_count: 전략이 계획한 총 분할 수. 배분 금액을 나누는 분모다
         stop_price: 손절가 (원본가). 진입가 비례 방식이면 None
         base_bar_date: 근거 기준봉 일자
         decline_count: 진입 시점의 하락 차수
+        is_refill: 보유 포지션에 더 담는 주문인지 여부. 그 포지션이 청산되면 함께 취소된다
     """
 
     ticker: str
     market: str
     cluster: tuple[str, ...]
     signal_date: date
-    limit_price: int
+    limit_prices: tuple[int, ...]
+    slice_count: int
     stop_price: int | None
     base_bar_date: date
     decline_count: int
+    is_refill: bool = False
 
 
 @dataclass
 class Position:
-    """보유 중인 포지션"""
+    """보유 중인 포지션
+
+    분할 매수라 체결이 여러 번 일어난다. 체결 이력을 그대로 들고 있으면서 평균단가는 파생으로
+    구한다 — 매입원가 합을 반올림된 평균단가로 되돌리면 손익에 오차가 생기기 때문이다.
+
+    Attributes:
+        slice_budget: 분할 한 자리에 배정된 금액 (원)
+        remaining_slices: 아직 사지 못한 분할 수. 0이면 추가 매수를 걸지 않는다
+        fills: 체결 이력 (체결가, 수량)
+    """
 
     ticker: str
     market: str
     cluster: tuple[str, ...]
     entry_date: date
-    entry_price: int
-    quantity: int
     stop_price: int
     target_price: int
     base_bar_date: date
     decline_count: int
     entry_fee: int
+    slice_budget: int
+    remaining_slices: int
+    fills: list[tuple[int, int]] = field(default_factory=list)
     invalidated: bool = False
+
+    @property
+    def quantity(self) -> int:
+        """보유 수량 (주)"""
+        return sum(quantity for _, quantity in self.fills)
+
+    @property
+    def cost_basis(self) -> int:
+        """매입원가 합 (원). 손익은 평균단가가 아니라 이 값으로 계산한다"""
+        return sum(price * quantity for price, quantity in self.fills)
+
+    @property
+    def average_price(self) -> int:
+        """평균단가 (원). 손절·익절 기준이며 원장에도 이 값이 남는다"""
+        quantity = self.quantity
+        if quantity <= 0:
+            raise RuntimeError(f"내부 불변조건 위반: 체결이 없는 포지션의 평균단가 조회 (ticker={self.ticker})")
+
+        return self.cost_basis // quantity
 
 
 @dataclass
@@ -106,7 +153,9 @@ class Trade:
     base_bar_date: date
     decline_count: int
     entry_date: date
-    entry_price: int
+    avg_entry_price: int
+    fill_count: int
+    invested: int
     quantity: int
     exit_date: date
     exit_price: int
@@ -136,6 +185,7 @@ class Diagnostics:
     invalidated_trades: int = 0
     delisting_exits: int = 0
     slot_blocked: int = 0
+    cancelled_refills: int = 0
 
     def as_dict(self) -> dict[str, int]:
         """리포트용 dict로 변환한다."""
@@ -149,6 +199,7 @@ class Diagnostics:
             "무효 처리 트레이드": self.invalidated_trades,
             "폐지 청산": self.delisting_exits,
             "슬롯 부족으로 포기": self.slot_blocked,
+            "청산으로 취소된 추가매수": self.cancelled_refills,
         }
 
 
@@ -422,7 +473,9 @@ def _close_positions(
 
         # 패널에서 사라졌다 = 폐지. 마지막으로 본 종가로 청산한다
         if bar is None:
-            cash = _record_exit(position, position.entry_price, target, ExitReason.DELISTING, cost_model, result, cash)
+            cash = _record_exit(
+                position, position.average_price, target, ExitReason.DELISTING, cost_model, result, cash
+            )
             del positions[ticker]
             result.diagnostics.delisting_exits += 1
             continue
@@ -502,10 +555,12 @@ def _record_exit(
     Returns:
         갱신된 현금
     """
+    quantity = position.quantity
     price = max(1, exit_price)
-    cost = cost_model.sell_cost(price, position.quantity, target, position.market)
-    proceeds = price * position.quantity - cost.total
-    gross = (price - position.entry_price) * position.quantity
+    cost = cost_model.sell_cost(price, quantity, target, position.market)
+    proceeds = price * quantity - cost.total
+    # 손익은 반올림된 평균단가가 아니라 매입원가 합으로 낸다 (분할 체결에서 오차가 생기지 않게)
+    gross = price * quantity - position.cost_basis
 
     result.trades.append(
         Trade(
@@ -515,8 +570,10 @@ def _record_exit(
             base_bar_date=position.base_bar_date,
             decline_count=position.decline_count,
             entry_date=position.entry_date,
-            entry_price=position.entry_price,
-            quantity=position.quantity,
+            avg_entry_price=position.average_price,
+            fill_count=len(position.fills),
+            invested=position.cost_basis,
+            quantity=quantity,
             exit_date=target,
             exit_price=price,
             exit_reason=reason.value,
@@ -525,6 +582,7 @@ def _record_exit(
             tax=cost.tax,
             net_pnl=gross - position.entry_fee - cost.total,
             holding_days=(target - position.entry_date).days,
+
             invalidated=position.invalidated,
         )
     )
@@ -548,9 +606,12 @@ def _open_positions(
 ) -> int:
     """전날 만든 예약 주문의 체결을 판정한다.
 
+    주문 하나에 지정가가 여러 개 있을 수 있고(분할 매수), 이미 보유 중인 종목이면 **기존 포지션에
+    누적**한다. 체결이 하나라도 붙으면 평균단가가 바뀌므로 손절가·익절가를 그 자리에서 다시 잡는다.
+
     Args:
         pending: 전날 만든 주문
-        positions: 보유 포지션 (체결 시 추가된다)
+        positions: 보유 포지션 (체결 시 추가·갱신된다)
         bars: 그날의 일봉
         target: 대상 일자
         cost_model: 비용 계산기
@@ -563,7 +624,15 @@ def _open_positions(
         갱신된 현금
     """
     for order in pending:
-        if len(positions) >= params.max_positions:
+        position = positions.get(order.ticker)
+
+        # 추가 매수는 그 포지션이 살아 있을 때만 유효하다. 청산된 뒤에 체결되면 이미 끝난
+        # 트레이드의 손절가·기준봉을 물려받은 새 포지션이 열린다
+        if order.is_refill and position is None:
+            result.diagnostics.cancelled_refills += 1
+            continue
+
+        if position is None and len(positions) >= params.max_positions:
             result.diagnostics.slot_blocked += 1
             continue
 
@@ -575,45 +644,130 @@ def _open_positions(
         if bar.is_limit_up_close:
             result.diagnostics.limit_up_blocked += 1
 
-        fill_price = fill_buy_limit(bar, order.limit_price)
-        if fill_price is None:
-            result.diagnostics.unfilled_count += 1
-            continue
-
-        budget = min(cash, cash // max(1, params.max_positions - len(positions)))
-        quantity = max_quantity(bar, fill_price, budget, execution_params)
-        if quantity <= 0:
-            result.diagnostics.unfilled_count += 1
-            continue
-
-        stop_price = order.stop_price if order.stop_price is not None else int(fill_price * (1 - params.stop_loss_rate))
-        if stop_price >= fill_price:
-            result.diagnostics.unfilled_count += 1
-            continue
-
-        risk = fill_price - stop_price
-        target_price = align_price(
-            fill_price + risk * params.reward_risk_ratio, bar.market, target, side=OrderSide.SELL
+        slice_budget = (
+            position.slice_budget
+            if position is not None
+            else min(cash, cash // max(1, params.max_positions - len(positions))) // order.slice_count
         )
 
-        cost = cost_model.buy_cost(fill_price, quantity)
-        cash -= fill_price * quantity + cost.total
+        fills, cash = _fill_slices(order, bar, slice_budget, cash, cost_model, execution_params, result)
+        if not fills:
+            continue
 
-        positions[order.ticker] = Position(
+        position = _apply_fills(order, position, fills, target, slice_budget, params, bar)
+        positions[order.ticker] = position
+
+    return cash
+
+
+def _fill_slices(
+    order: Order,
+    bar: DailyBar,
+    slice_budget: int,
+    cash: int,
+    cost_model: CostModel,
+    execution_params: ExecutionParams,
+    result: BacktestResult,
+) -> tuple[list[tuple[int, int, int]], int]:
+    """주문의 지정가를 위에서부터 훑어 체결분을 모은다.
+
+    유동성 상한은 **하루 단위**라 자리마다 새로 주어지지 않는다. 자리별로 상한을 다시 주면
+    분할 수만큼 상한이 늘어나 "거래대금의 1%"라는 가정이 무너진다.
+
+    Args:
+        order: 대상 주문
+        bar: 그날의 일봉
+        slice_budget: 분할 한 자리에 배정된 금액 (원)
+        cash: 현재 현금
+        cost_model: 비용 계산기
+        execution_params: 체결 가정
+        result: 결과 누적 대상
+
+    Returns:
+        (체결가, 수량, 수수료) 목록과 갱신된 현금
+    """
+    fills: list[tuple[int, int, int]] = []
+    liquidity_left = int(bar.value * execution_params.liquidity_participation_rate)
+    filled_any = False
+
+    for limit_price in order.limit_prices:
+        fill_price = fill_buy_limit(bar, limit_price)
+        if fill_price is None:
+            break
+
+        budget = min(slice_budget, cash, liquidity_left)
+        quantity = max_quantity(bar, fill_price, budget, execution_params) if budget > 0 else 0
+        if quantity <= 0:
+            break
+
+        cost = cost_model.buy_cost(fill_price, quantity)
+        spent = fill_price * quantity
+        cash -= spent + cost.total
+        liquidity_left -= spent
+        fills.append((fill_price, quantity, cost.fee))
+        filled_any = True
+
+    if not filled_any:
+        result.diagnostics.unfilled_count += 1
+
+    return fills, cash
+
+
+def _apply_fills(
+    order: Order,
+    position: Position | None,
+    fills: list[tuple[int, int, int]],
+    target: date,
+    slice_budget: int,
+    params: StrategyParams,
+    bar: DailyBar,
+) -> Position:
+    """체결분을 포지션에 반영하고 손절·익절을 평균단가 기준으로 다시 잡는다.
+
+    Args:
+        order: 대상 주문
+        position: 기존 포지션 (신규 진입이면 None)
+        fills: (체결가, 수량, 수수료) 목록
+        target: 체결일
+        slice_budget: 분할 한 자리에 배정된 금액 (원)
+        params: 전략 파라미터
+        bar: 그날의 일봉 (호가 정렬에 시장 구분이 필요하다)
+
+    Returns:
+        갱신된 포지션
+    """
+    if position is None:
+        position = Position(
             ticker=order.ticker,
             market=order.market,
             cluster=order.cluster,
             entry_date=target,
-            entry_price=fill_price,
-            quantity=quantity,
-            stop_price=stop_price,
-            target_price=target_price,
+            stop_price=0,
+            target_price=0,
             base_bar_date=order.base_bar_date,
             decline_count=order.decline_count,
-            entry_fee=cost.fee,
+            entry_fee=0,
+            slice_budget=slice_budget,
+            remaining_slices=order.slice_count,
         )
 
-    return cash
+    for fill_price, quantity, fee in fills:
+        position.fills.append((fill_price, quantity))
+        position.entry_fee += fee
+
+    position.remaining_slices = max(0, position.remaining_slices - len(fills))
+
+    average = position.average_price
+    stop_price = order.stop_price if order.stop_price is not None else int(average * (1 - params.stop_loss_rate))
+    position.stop_price = min(stop_price, average - 1)
+    position.target_price = align_price(
+        average + (average - position.stop_price) * params.reward_risk_ratio,
+        bar.market,
+        target,
+        side=OrderSide.SELL,
+    )
+
+    return position
 
 
 def _build_orders(
@@ -638,13 +792,16 @@ def _build_orders(
     무엇을 버릴지가 순회 순서로 정해진다 — 선택 기준 없이 후보를 버리는 셈이다. 강한 테마부터
     평가해 슬롯이 차면 멈추는 방식이라야 "가장 강한 테마를 산다"가 성립한다.
 
+    보유 중인 종목에는 **남은 분할의 추가 매수 주문**을 다시 건다. 이동평균은 매일 움직이므로
+    어제 걸어 둔 가격을 그대로 쓸 수 없다.
+
     Args:
         panel: 통합 패널
         histories: 종목별 사전 계산 시계열
         bars: 그날의 일봉
         target: 신호일
         params: 전략 파라미터
-        positions: 보유 포지션 (중복 진입 차단에 쓴다)
+        positions: 보유 포지션 (중복 진입 차단과 추가 매수에 쓴다)
         listed_days: 티커별 상장 경과 거래일
         result: 결과 누적 대상
         cash: 현재 현금
@@ -655,18 +812,20 @@ def _build_orders(
     """
     _refresh_themes(panel, histories, target, params, listed_days, result, themes)
 
-    if len(positions) >= params.max_positions or cash <= 0:
+    if cash <= 0:
         return []
+
+    orders = _build_refill_orders(histories, bars, positions, target, params)
 
     held_clusters = {position.cluster for position in positions.values()}
     available_slots = params.max_positions - len(positions)
-    orders: list[Order] = []
+    new_orders = 0
 
     # 강도 내림차순 — 동점이면 대장주 티커로 순서를 고정해 실행이 재현되게 한다
     ranked = sorted(themes.values(), key=lambda theme: (-theme.strength_score, theme.leader))
 
     for theme in ranked:
-        if len(orders) >= available_slots:
+        if new_orders >= available_slots:
             break
 
         if theme.cluster in held_clusters or theme.leader in positions:
@@ -675,9 +834,94 @@ def _build_orders(
         order = _build_order(histories, bars, theme, target, params)
         if order is not None:
             orders.append(order)
+            new_orders += 1
 
     result.diagnostics.order_count += len(orders)
     return orders
+
+
+def _build_refill_orders(
+    histories: dict[str, _TickerHistory],
+    bars: dict[str, DailyBar],
+    positions: dict[str, Position],
+    target: date,
+    params: StrategyParams,
+) -> list[Order]:
+    """보유 종목의 남은 분할을 다시 주문한다.
+
+    남은 자리는 **가격이 낮은 쪽부터** 채운다. 위쪽 자리는 이미 지나갔으므로 추가 매수는 언제나
+    더 아래에서 일어나야 한다.
+
+    Args:
+        histories: 종목별 사전 계산 시계열
+        bars: 그날의 일봉
+        positions: 보유 포지션
+        target: 신호일
+        params: 전략 파라미터
+
+    Returns:
+        추가 매수 주문 목록
+    """
+    orders: list[Order] = []
+
+    for position in positions.values():
+        if position.remaining_slices <= 0:
+            continue
+
+        history = histories.get(position.ticker)
+        bar = bars.get(position.ticker)
+        if history is None or bar is None or not is_tradable(bar):
+            continue
+
+        index = history.positions.get(target)
+        if index is None:
+            continue
+
+        prices = _entry_limit_prices(history, index, bar, target, params)
+        if prices is None:
+            continue
+
+        stop_price = _stop_price(history, index, bar, target, params, prices[-1])
+        if not _is_stop_price_usable(stop_price, prices[-1], params):
+            continue
+
+        orders.append(
+            Order(
+                ticker=position.ticker,
+                market=bar.market,
+                cluster=position.cluster,
+                signal_date=target,
+                limit_prices=prices[-position.remaining_slices :],
+                slice_count=position.remaining_slices,
+                stop_price=stop_price,
+                base_bar_date=position.base_bar_date,
+                decline_count=position.decline_count,
+                is_refill=True,
+            )
+        )
+
+    return orders
+
+
+def _is_stop_price_usable(stop_price: int | None, limit_price: int, params: StrategyParams) -> bool:
+    """손절가를 쓸 수 있는지 본다.
+
+    고정 비율 방식만 None이 정상이다 — 실제 평균단가가 정해진 뒤에 계산하기 때문이다.
+    지표 기반 방식에서 None이면 손절선을 모른다는 뜻이므로, 조용히 다른 방식으로 넘어가지 않고
+    주문을 만들지 않는다.
+
+    Args:
+        stop_price: 계산된 손절가 (원)
+        limit_price: 가장 낮은 매수 지정가 (원)
+        params: 전략 파라미터
+
+    Returns:
+        주문을 만들어도 되는지 여부
+    """
+    if params.stop_loss_kind is StopLossKind.FIXED:
+        return True
+
+    return stop_price is not None and stop_price < limit_price
 
 
 def _refresh_themes(
@@ -799,12 +1043,12 @@ def _build_order(
     if not 1 <= decline_count <= params.max_decline_count:
         return None
 
-    limit_price = _entry_limit_price(history, position, bar, target, params)
-    if limit_price is None:
+    limit_prices = _entry_limit_prices(history, position, bar, target, params)
+    if limit_prices is None:
         return None
 
-    stop_price = _stop_price(history, position, bar, target, params, limit_price)
-    if stop_price is not None and stop_price >= limit_price:
+    stop_price = _stop_price(history, position, bar, target, params, limit_prices[-1])
+    if not _is_stop_price_usable(stop_price, limit_prices[-1], params):
         return None
 
     return Order(
@@ -812,7 +1056,8 @@ def _build_order(
         market=bar.market,
         cluster=theme.cluster,
         signal_date=target,
-        limit_price=limit_price,
+        limit_prices=limit_prices,
+        slice_count=len(limit_prices),
         stop_price=stop_price,
         base_bar_date=theme.base_bar_date,
         decline_count=decline_count,
@@ -860,14 +1105,16 @@ def _axis_factor(history: _TickerHistory, position: int, bar: DailyBar) -> float
     return bar.close / adjusted
 
 
-def _entry_limit_price(
+def _entry_limit_prices(
     history: _TickerHistory,
     position: int,
     bar: DailyBar,
     target: date,
     params: StrategyParams,
-) -> int | None:
+) -> tuple[int, ...] | None:
     """매수 지정가를 구한다 (설계 §6.1).
+
+    밴드 분할 방식만 여러 개를 돌려주고 나머지는 하나다.
 
     수정주가로 계산한 지표는 축 변환 계수로 원본가에 되돌린 뒤 호가에 맞춘다.
     매수는 **내림** 정렬이라 체결 조건이 더 빡빡해진다.
@@ -880,8 +1127,11 @@ def _entry_limit_price(
         params: 전략 파라미터
 
     Returns:
-        지정가 (구할 수 없으면 None)
+        지정가 (내림차순). 구할 수 없으면 None
     """
+    if params.entry_price_kind is EntryPriceKind.MA_BAND_SPLIT:
+        return _band_limit_prices(history, position, bar, target, params)
+
     if params.entry_price_kind is EntryPriceKind.CLOSE_DISCOUNT:
         raw_price = bar.close * (1 - params.entry_discount_rate)
     elif params.entry_price_kind is EntryPriceKind.PREVIOUS_LOW:
@@ -897,7 +1147,49 @@ def _entry_limit_price(
         return None
 
     aligned = align_price(raw_price, bar.market, target, side=OrderSide.BUY)
-    return aligned if aligned > 0 else None
+    return (aligned,) if aligned > 0 else None
+
+
+def _band_limit_prices(
+    history: _TickerHistory,
+    position: int,
+    bar: DailyBar,
+    target: date,
+    params: StrategyParams,
+) -> tuple[int, ...] | None:
+    """이동평균 밴드를 나눈 분할 매수 지정가를 구한다.
+
+    **이미 신호일 종가 아래로 내려간 자리는 제외한다.** 그 자리는 지나간 가격이라 다음 날 시가에
+    통째로 체결돼 "분할해서 나눠 산다"가 성립하지 않는다.
+
+    Args:
+        history: 종목 시계열
+        position: 신호일의 행 위치
+        bar: 신호일 일봉
+        target: 신호일
+        params: 전략 파라미터
+
+    Returns:
+        지정가 (내림차순). 역배열이거나 살 자리가 없으면 None
+    """
+    factor = _axis_factor(history, position, bar)
+    if factor is None:
+        return None
+
+    bounds: list[float] = []
+    for period in params.entry_band_periods:
+        average = next_day_moving_average(history.adj_close.tolist(), position, period)
+        if average is None:
+            return None
+        bounds.append(average * factor)
+
+    aligned = [
+        align_price(price, bar.market, target, side=OrderSide.BUY)
+        for price in band_split_prices(bounds, ORDERS_PER_BAND)
+    ]
+    usable = tuple(price for price in aligned if 0 < price < bar.close)
+
+    return usable if usable else None
 
 
 def _stop_price(
@@ -911,7 +1203,10 @@ def _stop_price(
     """손절가를 구한다 (설계 §6.2).
 
     고정 비율 방식은 **실제 진입가가 정해진 뒤** 계산해야 하므로 None을 돌려주고,
-    체결 시점에 엔진이 진입가 기준으로 잡는다.
+    체결 시점에 엔진이 평균단가 기준으로 잡는다.
+
+    밴드 하한선 방식은 가장 긴 이동평균 아래에 여유를 둔다. 그 선이 매수 하한이므로 아래로
+    이탈하면 눌림목 가설이 무너진 것이고, 여유가 없으면 마지막 분할 자리와 붙어 사자마자 잘린다.
 
     Args:
         history: 종목 시계열
@@ -919,7 +1214,7 @@ def _stop_price(
         bar: 신호일 일봉
         target: 신호일
         params: 전략 파라미터
-        limit_price: 매수 지정가 (원)
+        limit_price: 가장 낮은 매수 지정가 (원)
 
     Returns:
         손절가 (진입가 기준으로 미루면 None)
@@ -931,7 +1226,10 @@ def _stop_price(
     if factor is None:
         return None
 
-    if params.stop_loss_kind is StopLossKind.MOVING_AVERAGE:
+    if params.stop_loss_kind is StopLossKind.BAND_FLOOR:
+        floor = next_day_moving_average(history.adj_close.tolist(), position, params.entry_band_periods[-1])
+        reference = None if floor is None else floor * factor * (1 - params.stop_loss_rate)
+    elif params.stop_loss_kind is StopLossKind.MOVING_AVERAGE:
         average = _moving_average(history, position, params.stop_loss_ma_period)
         reference = None if average is None else average * factor
     else:

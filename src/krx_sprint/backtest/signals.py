@@ -1,4 +1,4 @@
-"""신호 로직 — 기준봉·스윙·N차 하락 카운팅
+"""신호 로직 — 기준봉·스윙·N차 하락 카운팅·이동평균 밴드
 
 백테스트 설계 §5를 코드로 옮긴다.
 
@@ -170,6 +170,82 @@ def count_declines(
         counts[position] = count
 
     return tuple(counts)
+
+
+def next_day_moving_average(prices: Sequence[float], position: int, window: int) -> float | None:
+    """다음 거래일의 이동평균을 구한다.
+
+    주문 가격은 신호일 저녁에 확정되는데 다음 거래일 종가는 아직 없다. 그래서 **신호일 종가가
+    그대로 이어진다고 가정**하고 창의 마지막 칸을 채운다. 신호일까지의 값만 읽으므로 PIT가
+    깨지지 않는다.
+
+    0 이하 종가(거래정지)가 창에 섞이면 평균이 의미를 잃으므로 값을 주지 않는다.
+
+    Args:
+        prices: 수정주가 종가열 (일자 오름차순)
+        position: 신호일의 행 위치
+        window: 이동평균 기간 (거래일)
+
+    Returns:
+        다음 거래일의 이동평균 (창을 못 채우면 None)
+
+    Raises:
+        ValueError: 기간이 0 이하이거나 신호일 위치가 구간을 벗어난 경우
+    """
+    if window <= 0:
+        raise ValueError(f"이동평균 기간은 0보다 커야 합니다: {window}")
+
+    if not 0 <= position < len(prices):
+        raise ValueError(f"신호일 위치가 구간을 벗어났습니다: {position} (길이 {len(prices)})")
+
+    # 창의 마지막 칸은 신호일 종가로 채우므로 과거는 window - 1 개만 있으면 된다
+    if position + 1 < window - 1:
+        return None
+
+    history = [float(value) for value in prices[position + 2 - window : position + 1]]
+    window_values = [*history, float(prices[position])]
+
+    if any(value <= 0 for value in window_values):
+        return None
+
+    return sum(window_values) / window
+
+
+def band_split_prices(bounds: Sequence[float], orders_per_band: int) -> tuple[float, ...]:
+    """밴드 경계 사이를 균등 분할한 매수 가격을 만든다.
+
+    경계선 **자체가 아니라 경계 사이의 내부점**을 쓴다. 선이 깨진 뒤에 사는 것이 규칙이므로
+    선 위에서 받치는 주문은 이 전략의 자리가 아니다.
+
+    경계는 가격이 높은 쪽부터 순서대로 내려와야 한다. 짧은 이동평균이 긴 것보다 아래에 있으면
+    (역배열) 눌림목이 아니라 추세 하락이므로 매수 자리를 만들지 않는다.
+
+    Args:
+        bounds: 밴드 경계 가격 (짧은 이동평균부터). 순 내림차순이어야 한다
+        orders_per_band: 밴드 하나당 지정가 개수
+
+    Returns:
+        분할 지정가 (내림차순). 역배열이면 빈 튜플
+
+    Raises:
+        ValueError: 경계가 둘 미만이거나 밴드당 개수가 0 이하인 경우
+    """
+    if len(bounds) < 2:
+        raise ValueError(f"밴드 경계는 두 개 이상이어야 합니다: {len(bounds)}개")
+
+    if orders_per_band <= 0:
+        raise ValueError(f"밴드당 지정가 개수는 0보다 커야 합니다: {orders_per_band}")
+
+    values = [float(bound) for bound in bounds]
+    if any(values[index] <= values[index + 1] for index in range(len(values) - 1)):
+        return ()
+
+    prices: list[float] = []
+    for upper, lower in zip(values, values[1:], strict=False):
+        step = (upper - lower) / (orders_per_band + 1)
+        prices.extend(upper - step * offset for offset in range(1, orders_per_band + 1))
+
+    return tuple(prices)
 
 
 def mark_base_bars(series: pd.DataFrame, params: StrategyParams) -> pd.Series:
