@@ -27,6 +27,7 @@ from krx_sprint.backtest.execution import (
     DailyBar,
     ExitReason,
     fill_buy_limit,
+    fill_buy_stop,
     is_tradable,
     max_quantity,
     resolve_exit,
@@ -82,6 +83,7 @@ class Order:
         base_bar_date: 근거 기준봉 일자
         decline_count: 진입 시점의 하락 차수
         is_refill: 보유 포지션에 더 담는 주문인지 여부. 그 포지션이 청산되면 함께 취소된다
+        is_stop_entry: 역지정가 주문인지 여부. 참이면 가격이 **올라와야** 체결된다
     """
 
     ticker: str
@@ -94,6 +96,7 @@ class Order:
     base_bar_date: date
     decline_count: int
     is_refill: bool = False
+    is_stop_entry: bool = False
 
 
 @dataclass
@@ -582,7 +585,6 @@ def _record_exit(
             tax=cost.tax,
             net_pnl=gross - position.entry_fee - cost.total,
             holding_days=(target - position.entry_date).days,
-
             invalidated=position.invalidated,
         )
     )
@@ -691,7 +693,7 @@ def _fill_slices(
     filled_any = False
 
     for limit_price in order.limit_prices:
-        fill_price = fill_buy_limit(bar, limit_price)
+        fill_price = fill_buy_stop(bar, limit_price) if order.is_stop_entry else fill_buy_limit(bar, limit_price)
         if fill_price is None:
             break
 
@@ -897,6 +899,7 @@ def _build_refill_orders(
                 base_bar_date=position.base_bar_date,
                 decline_count=position.decline_count,
                 is_refill=True,
+                is_stop_entry=params.entry_price_kind is EntryPriceKind.MA_RECLAIM,
             )
         )
 
@@ -1061,6 +1064,7 @@ def _build_order(
         stop_price=stop_price,
         base_bar_date=theme.base_bar_date,
         decline_count=decline_count,
+        is_stop_entry=params.entry_price_kind is EntryPriceKind.MA_RECLAIM,
     )
 
 
@@ -1132,6 +1136,9 @@ def _entry_limit_prices(
     if params.entry_price_kind is EntryPriceKind.MA_BAND_SPLIT:
         return _band_limit_prices(history, position, bar, target, params)
 
+    if params.entry_price_kind is EntryPriceKind.MA_RECLAIM:
+        return _reclaim_limit_prices(history, position, bar, target, params)
+
     if params.entry_price_kind is EntryPriceKind.CLOSE_DISCOUNT:
         raw_price = bar.close * (1 - params.entry_discount_rate)
     elif params.entry_price_kind is EntryPriceKind.PREVIOUS_LOW:
@@ -1148,6 +1155,83 @@ def _entry_limit_prices(
 
     aligned = align_price(raw_price, bar.market, target, side=OrderSide.BUY)
     return (aligned,) if aligned > 0 else None
+
+
+def _reclaim_limit_prices(
+    history: _TickerHistory,
+    position: int,
+    bar: DailyBar,
+    target: date,
+    params: StrategyParams,
+) -> tuple[int, ...] | None:
+    """이탈한 이동평균선을 되찾는 자리의 역지정가를 구한다.
+
+    **깨진 선을 되찾는 것을 확인하고 산다.** 신호일 종가가 어떤 선 아래로 마감했으면 그 선을
+    이탈한 것이고, 그 중 **가장 낮은 선**(= 종가 바로 위)이 되찾아야 할 자리다. 아직 깬 선이
+    없으면 살 이유가 없다.
+
+    분할하지 않는다 — 되찾음을 확인한 시점이 하나뿐이라 나눌 자리가 없다.
+
+    Args:
+        history: 종목 시계열
+        position: 신호일의 행 위치
+        bar: 신호일 일봉
+        target: 신호일
+        params: 전략 파라미터
+
+    Returns:
+        역지정가 한 개. 역배열이거나 이탈한 선이 없으면 None
+    """
+    bounds = _band_bounds(history, position, bar, params)
+    if bounds is None:
+        return None
+
+    broken = [price for price in bounds if price > bar.close]
+    if not broken:
+        return None
+
+    # 매수는 내림 정렬이지만 역지정가는 그만큼 더 빨리 체결되므로 올림으로 불리하게 맞춘다
+    aligned = align_price(min(broken), bar.market, target, side=OrderSide.SELL)
+
+    return (aligned,) if aligned > 0 else None
+
+
+def _band_bounds(
+    history: _TickerHistory,
+    position: int,
+    bar: DailyBar,
+    params: StrategyParams,
+) -> list[float] | None:
+    """밴드 경계가 되는 이동평균을 원본가 축으로 구한다.
+
+    정배열이 아니면 밴드 정의가 성립하지 않으므로 값을 주지 않는다.
+
+    Args:
+        history: 종목 시계열
+        position: 신호일의 행 위치
+        bar: 신호일 일봉
+        params: 전략 파라미터
+
+    Returns:
+        경계 가격 (짧은 이동평균부터). 구할 수 없거나 역배열이면 None
+    """
+    factor = _axis_factor(history, position, bar)
+    if factor is None:
+        return None
+
+    prices = history.adj_close.tolist()
+    bounds: list[float] = []
+
+    for period in params.entry_band_periods:
+        average = next_day_moving_average(prices, position, period)
+        if average is None:
+            return None
+        bounds.append(average * factor)
+
+    if any(bounds[index] <= bounds[index + 1] for index in range(len(bounds) - 1)):
+        return None
+
+    return bounds
 
 
 def _band_limit_prices(
@@ -1172,16 +1256,9 @@ def _band_limit_prices(
     Returns:
         지정가 (내림차순). 역배열이거나 살 자리가 없으면 None
     """
-    factor = _axis_factor(history, position, bar)
-    if factor is None:
+    bounds = _band_bounds(history, position, bar, params)
+    if bounds is None:
         return None
-
-    bounds: list[float] = []
-    for period in params.entry_band_periods:
-        average = next_day_moving_average(history.adj_close.tolist(), position, period)
-        if average is None:
-            return None
-        bounds.append(average * factor)
 
     aligned = [
         align_price(price, bar.market, target, side=OrderSide.BUY)

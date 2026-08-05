@@ -219,7 +219,18 @@ poetry run python scripts/backtest/run_backtest.py --start 2023-01-01 --end 2026
 
 # 무비용 대조군 (새니티 체크 — 수수료·거래세·슬리피지를 모두 0으로)
 poetry run python scripts/backtest/run_backtest.py --start 2019-01-01 --end 2022-12-31 --no-cost --label nocost
+
+# 진입 방식 비교 (band=이탈 밴드 분할 / reclaim=회복 확인 / close-discount=종가 대비 할인)
+poetry run python scripts/backtest/run_backtest.py --start 2019-01-01 --end 2022-12-31 --entry band --label band
+poetry run python scripts/backtest/run_backtest.py --start 2019-01-01 --end 2022-12-31 --entry reclaim --label reclaim
+
+# 손절 방식 비교 (band-floor=밴드 하한선 / fixed=평균단가 대비 고정 비율 / moving-average / swing-low)
+poetry run python scripts/backtest/run_backtest.py --start 2019-01-01 --end 2022-12-31 --entry reclaim --stop fixed --label reclaim-fixed
 ```
+
+> `--entry`·`--stop`을 생략하면 `src/krx_sprint/backtest/params.py`의 기본값을 쓴다.
+> 두 축을 따로 고를 수 있게 둔 이유는 **진입 방식마다 알맞은 손절선이 다르기 때문**이다 —
+> 회복 확인 진입은 밴드 하한선보다 위에서 사므로 같은 손절선을 쓰면 손절폭이 구조적으로 넓어진다.
 
 > 패널 빌드가 선행 조건이다. 캐시가 원천 데이터와 어긋나면 로더가 예외를 던진다.
 > 매매 종료일은 캘린더 끝에서 **2거래일 앞으로 자동 조정**된다 — 매도 세율이 결제일(T+2) 기준이라

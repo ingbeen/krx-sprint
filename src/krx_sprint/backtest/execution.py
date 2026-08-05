@@ -123,6 +123,38 @@ def fill_buy_limit(bar: DailyBar, limit_price: int) -> int | None:
     return None
 
 
+def fill_buy_stop(bar: DailyBar, stop_price: int) -> int | None:
+    """역지정가 매수의 체결 여부와 체결가를 구한다.
+
+    지정가 매수와 반대로 **가격이 올라와야** 체결된다. 이탈한 선을 되찾는 것을 확인하고 사는
+    진입에 쓴다.
+
+    시가가 이미 기준가 위면(갭 상승) 시가에 체결된다 — 역지정가는 그 가격을 지켜주지 않는다.
+
+    Args:
+        bar: 대상 일봉
+        stop_price: 역지정가 (원)
+
+    Returns:
+        체결가 (미체결이면 None)
+
+    Raises:
+        ValueError: 역지정가가 0 이하인 경우
+    """
+    _require_positive_price(stop_price)
+
+    if not is_tradable(bar) or bar.is_limit_up_close:
+        return None
+
+    if bar.open >= stop_price:
+        return bar.open
+
+    if bar.high >= stop_price:
+        return stop_price
+
+    return None
+
+
 def fill_sell_limit(bar: DailyBar, limit_price: int) -> int | None:
     """매도 지정가(익절)의 체결 여부와 체결가를 구한다.
 

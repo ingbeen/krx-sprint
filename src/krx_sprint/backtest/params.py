@@ -34,12 +34,14 @@ class EntryPriceKind(Enum):
     """매수 지정가 산정 방식 (설계 §6.1)
 
     `MA_BAND_SPLIT`만 한 종목을 여러 번에 나눠 사고, 나머지는 한 번에 산다.
+    `MA_RECLAIM`만 가격이 **올라올 때** 사고, 나머지는 내려올 때 산다.
     """
 
     CLOSE_DISCOUNT = "종가 대비 할인"
     MOVING_AVERAGE = "이동평균"
     PREVIOUS_LOW = "전일 저가"
     MA_BAND_SPLIT = "이동평균 밴드 분할"
+    MA_RECLAIM = "이동평균 회복 확인"
 
 
 @dataclass(frozen=True)

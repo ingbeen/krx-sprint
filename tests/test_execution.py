@@ -18,6 +18,7 @@ from krx_sprint.backtest.execution import (
     DailyBar,
     ExitReason,
     fill_buy_limit,
+    fill_buy_stop,
     fill_sell_limit,
     fill_stop_loss,
     is_tradable,
@@ -139,6 +140,66 @@ class TestBuyLimit:
         Then: None
         """
         assert fill_buy_limit(_bar(is_halted=True), 9_800) is None
+
+
+class TestBuyStop:
+    """역지정가 매수(회복 확인 진입)를 고정한다."""
+
+    def test_fills_at_stop_price_when_high_reaches_it(self):
+        """
+        목적: 장중 고가가 기준가에 닿으면 그 가격에 산다 — 되찾음을 확인하고 들어가는 진입이다.
+
+        Given: 시가 9,000 · 고가 9,600 인 봉과 역지정가 9,500
+        When: fill_buy_stop 호출
+        Then: 9,500에 체결
+        """
+        # Given
+        bar = _bar(open_price=9_000, high=9_600, low=8_900, close=9_550)
+
+        # When / Then
+        assert fill_buy_stop(bar, 9_500) == 9_500
+
+    def test_gap_up_fills_at_open(self):
+        """
+        목적: 갭 상승으로 시가가 이미 기준가 위면 **시가**에 체결된다 — 역지정가는 가격을 지켜주지 않는다.
+
+        Given: 시가가 역지정가보다 높은 봉
+        When: fill_buy_stop 호출
+        Then: 시가에 체결
+        """
+        # Given
+        bar = _bar(open_price=9_800, high=9_900, low=9_700, close=9_850)
+
+        # When / Then
+        assert fill_buy_stop(bar, 9_500) == 9_800
+
+    def test_unfilled_when_high_falls_short(self):
+        """
+        목적: 고가가 기준가에 못 미치면 미체결이다 — 회복하지 못한 종목은 사지 않는다.
+
+        Given: 고가가 역지정가보다 낮은 봉
+        When: fill_buy_stop 호출
+        Then: None
+        """
+        # Given
+        bar = _bar(open_price=9_000, high=9_400, low=8_900, close=9_300)
+
+        # When / Then
+        assert fill_buy_stop(bar, 9_500) is None
+
+    def test_limit_up_close_blocks_the_fill(self):
+        """
+        목적: 상한가 마감일은 살 수 없다 — 지정가 매수와 같은 처리다.
+
+        Given: 상한가로 마감한 봉
+        When: fill_buy_stop 호출
+        Then: None
+        """
+        # Given
+        bar = _bar(open_price=9_000, high=9_600, low=8_900, close=9_600, is_limit_up_close=True)
+
+        # When / Then
+        assert fill_buy_stop(bar, 9_500) is None
 
 
 class TestSellLimit:

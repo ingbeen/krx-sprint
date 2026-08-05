@@ -10,13 +10,13 @@ KRX에 요청하지 않고 저장된 parquet만 읽는다.
 import argparse
 import json
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from krx_sprint.backtest.engine import run_backtest
 from krx_sprint.backtest.metrics import equity_frame, summarize, summary_payload, trades_frame
-from krx_sprint.backtest.params import ExecutionParams, StrategyParams
+from krx_sprint.backtest.params import EntryPriceKind, ExecutionParams, StopLossKind, StrategyParams
 from krx_sprint.common_constants import BACKTEST_DIR, KST
 from krx_sprint.panel.loader import load_panel, load_trading_days
 from krx_sprint.utils.cli_helpers import cli_exception_handler
@@ -43,6 +43,21 @@ DIAGNOSTIC_TABLE_COLUMNS = [
     ("진단 항목", 24, Align.LEFT),
     ("건수", 14, Align.RIGHT),
 ]
+
+# 진입·손절 방식 비교 실행용 이름 (설계 v2 — 같은 종목 선정 위에서 한 축만 바꿔 대조한다).
+# 진입 방식마다 알맞은 손절선이 다를 수 있어 두 축을 따로 고를 수 있게 둔다
+ENTRY_CHOICES = {
+    "band": EntryPriceKind.MA_BAND_SPLIT,
+    "reclaim": EntryPriceKind.MA_RECLAIM,
+    "close-discount": EntryPriceKind.CLOSE_DISCOUNT,
+}
+
+STOP_CHOICES = {
+    "band-floor": StopLossKind.BAND_FLOOR,
+    "fixed": StopLossKind.FIXED,
+    "moving-average": StopLossKind.MOVING_AVERAGE,
+    "swing-low": StopLossKind.SWING_LOW,
+}
 
 
 def _parse_date(value: str) -> date:
@@ -77,6 +92,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--end", type=_parse_date, default=None, help="매매 종료 일자 (YYYY-MM-DD)")
     parser.add_argument("--label", default=None, help="결과 폴더에 붙일 이름")
     parser.add_argument("--no-cost", action="store_true", help="비용 0으로 실행 (새니티 체크용)")
+    parser.add_argument(
+        "--entry",
+        choices=sorted(ENTRY_CHOICES),
+        default=None,
+        help="진입 방식 (생략하면 params.py 기본값). band=이탈 밴드 분할, reclaim=회복 확인",
+    )
+    parser.add_argument(
+        "--stop",
+        choices=sorted(STOP_CHOICES),
+        default=None,
+        help="손절 방식 (생략하면 params.py 기본값). band-floor=밴드 하한선, fixed=평균단가 대비 고정 비율",
+    )
 
     return parser.parse_args()
 
@@ -108,6 +135,11 @@ def main() -> int:
     args = _parse_args()
 
     params = StrategyParams()
+    if args.entry is not None:
+        params = replace(params, entry_price_kind=ENTRY_CHOICES[args.entry])
+    if args.stop is not None:
+        params = replace(params, stop_loss_kind=STOP_CHOICES[args.stop])
+
     execution_params = (
         ExecutionParams(fee_rate=0.0, include_tax=False, stop_loss_slippage_ticks=0)
         if args.no_cost

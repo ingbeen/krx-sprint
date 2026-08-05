@@ -218,8 +218,8 @@ def _band_values(length: int) -> dict[str, list[int]]:
     return {ticker: series for ticker in (LEADER, PEER, OTHER)}
 
 
-def _run_band(tail: list[int], lows: list[int] | None = None):
-    """밴드 분할 시나리오를 실행한다. `lows`는 tail 구간의 저가다."""
+def _run_band(tail: list[int], lows: list[int] | None = None, params: StrategyParams = BAND_PARAMS):
+    """밴드 시나리오를 실행한다. `lows`는 tail 구간의 저가다."""
     closes = _band_closes(tail)
     length = len(closes[LEADER])
     low_series = None
@@ -230,7 +230,7 @@ def _run_band(tail: list[int], lows: list[int] | None = None):
 
     panel = _panel(closes, _band_values(length), low_series)
 
-    return run_backtest(panel, _trading_days(40), BAND_PARAMS, EXECUTION)
+    return run_backtest(panel, _trading_days(40), params, EXECUTION)
 
 
 def _has_overlap(result) -> bool:
@@ -493,13 +493,68 @@ class TestBandSplitEntry:
         closes[OTHER] = closes[OTHER][: len(core)]
 
         # When
-        result = run_backtest(
-            _panel(closes, _band_values(len(core))), _trading_days(40), BAND_PARAMS, EXECUTION
-        )
+        result = run_backtest(_panel(closes, _band_values(len(core))), _trading_days(40), BAND_PARAMS, EXECUTION)
 
         # Then
         assert result.diagnostics.signal_count > 0
         assert result.diagnostics.order_count == 0
+
+
+class TestReclaimEntry:
+    """이탈 후 회복 확인 진입의 계약을 고정한다."""
+
+    def test_buys_only_after_price_climbs_back(self):
+        """
+        목적: 회복 확인 진입은 **가격이 올라와야** 산다 — 계속 흘러내리는 종목은 담지 않는다.
+
+        Given: 이탈 뒤 반등하는 시나리오와, 이탈 뒤 계속 내려가는 시나리오
+        When: 회복 확인 방식으로 각각 실행
+        Then: 반등한 쪽만 체결된다
+        """
+        # Given
+        params = replace(BAND_PARAMS, entry_price_kind=EntryPriceKind.MA_RECLAIM)
+
+        # When
+        rebound = _run_band([1_050, 1_120, 1_400], params=params)
+        keep_falling = _run_band([1_050, 1_010, 990], params=params)
+
+        # Then
+        assert rebound.trades
+        assert not keep_falling.trades
+
+    def test_entry_is_a_single_fill(self):
+        """
+        목적: 회복 확인 진입은 나누지 않는다 — 되찾음을 확인한 시점이 하나뿐이다.
+
+        Given: 회복해서 체결되는 시나리오
+        When: run_backtest 실행
+        Then: 체결 횟수가 1이다
+        """
+        # Given
+        params = replace(BAND_PARAMS, entry_price_kind=EntryPriceKind.MA_RECLAIM)
+
+        # When
+        result = _run_band([1_050, 1_120, 1_400], params=params)
+
+        # Then
+        assert result.trades[0].fill_count == 1
+
+    def test_entry_price_is_above_the_signal_close(self):
+        """
+        목적: 진입가는 신호일 종가보다 **위**다 — 이탈한 선을 되찾은 자리에서 사기 때문이다.
+
+        Given: 신호일 종가 1,050으로 5일선을 이탈한 뒤 회복하는 시나리오
+        When: run_backtest 실행
+        Then: 평균단가가 신호일 종가보다 높다
+        """
+        # Given
+        params = replace(BAND_PARAMS, entry_price_kind=EntryPriceKind.MA_RECLAIM)
+
+        # When
+        trade = _run_band([1_050, 1_120, 1_400], params=params).trades[0]
+
+        # Then
+        assert trade.avg_entry_price > 1_050
 
 
 class TestGuards:
