@@ -15,12 +15,16 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
+from krx_sprint.backtest.engine import run_backtest
 from krx_sprint.backtest.event_study import (
     ReturnBasis,
+    SignalLayer,
     add_excess_returns,
     compute_forward_returns,
     excess_column,
+    extract_signal_layers,
     return_column,
+    summarize_layers,
 )
 from krx_sprint.common_constants import (
     COL_ADJ_CLOSE,
@@ -318,3 +322,122 @@ class TestExcessReturns:
         # When / Then
         with pytest.raises(ValueError, match="마스크 길이"):
             add_excess_returns(frame, horizons=(1,), baseline_mask=pd.Series([True]))
+
+
+class TestSignalLayers:
+    """신호 계층 추출의 계약을 고정한다."""
+
+    def test_layers_match_the_engine_order_dates(self):
+        """
+        목적: **계약 테스트** — 최종 계층(정배열)이 엔진이 실제로 주문을 내는 (일자, 종목)과 일치한다.
+        두 경로가 갈라지면 측정 대상이 실제 전략과 다른 것이 된다.
+
+        Given: 엔진 테스트와 같은 밴드 진입 시나리오
+        When: 이벤트 스터디의 계층 추출과 엔진 실행을 각각 돌린다
+        Then: 정배열 계층이 표시된 일자에 엔진도 진입 후보를 만든다
+        """
+        # Given
+        import test_engine as engine_fixtures
+
+        closes = engine_fixtures._band_closes([1_095, 1_300, 1_300])
+        panel = engine_fixtures._panel(closes, engine_fixtures._band_values(len(closes[engine_fixtures.LEADER])))
+        params = engine_fixtures.BAND_PARAMS
+
+        # When
+        layers = extract_signal_layers(panel, params)
+        result = run_backtest(panel, engine_fixtures._trading_days(40), params, engine_fixtures.EXECUTION)
+
+        # Then
+        assert layers["aligned"].sum() > 0
+        assert result.diagnostics.order_count == int(layers["aligned"].sum())
+
+    def test_layers_are_nested_within_the_surge_day_group(self):
+        """
+        목적: 급등일 그룹의 층은 앞 층의 부분집합이다 — 조건을 더하는 구조라야 분해가 성립한다.
+
+        Given: 밴드 진입 시나리오
+        When: 계층 추출
+        Then: 대장주 ⊆ 테마 소속 ⊆ 급등 ⊆ 유니버스
+        """
+        # Given
+        import test_engine as engine_fixtures
+
+        closes = engine_fixtures._band_closes([1_095, 1_300, 1_300])
+        panel = engine_fixtures._panel(closes, engine_fixtures._band_values(len(closes[engine_fixtures.LEADER])))
+
+        # When
+        layers = extract_signal_layers(panel, engine_fixtures.BAND_PARAMS)
+
+        # Then
+        assert not (layers["leader"] & ~layers["clustered"]).any()
+        assert not (layers["clustered"] & ~layers["surged"]).any()
+        assert not (layers["surged"] & ~layers["universe"]).any()
+
+    def test_future_rows_do_not_change_the_layers(self):
+        """
+        목적: **look-ahead 감시** — 신호일 뒤에 구간이 더 붙어도 그날의 계층 판정이 달라지면 안 된다.
+
+        Given: 같은 시나리오의 짧은 패널과 뒤가 더 붙은 패널
+        When: 각각 계층 추출
+        Then: 겹치는 구간의 판정이 동일하다
+        """
+        # Given
+        import test_engine as engine_fixtures
+
+        short_closes = engine_fixtures._band_closes([1_095])
+        long_closes = engine_fixtures._band_closes([1_095, 1_300, 1_300])
+        short_panel = engine_fixtures._panel(
+            short_closes, engine_fixtures._band_values(len(short_closes[engine_fixtures.LEADER]))
+        )
+        long_panel = engine_fixtures._panel(
+            long_closes, engine_fixtures._band_values(len(long_closes[engine_fixtures.LEADER]))
+        )
+
+        # When
+        short_layers = extract_signal_layers(short_panel, engine_fixtures.BAND_PARAMS)
+        long_layers = extract_signal_layers(long_panel, engine_fixtures.BAND_PARAMS)
+
+        # Then
+        overlap = long_layers[long_layers[COL_DATE].isin(short_layers[COL_DATE])].reset_index(drop=True)
+        pd.testing.assert_frame_equal(short_layers, overlap)
+
+
+class TestSummarizeLayers:
+    """집계의 표본 단위 계약을 고정한다."""
+
+    def test_day_unit_is_the_default_test_sample(self):
+        """
+        목적: 같은 날 여러 종목이 있어도 **일자 단위로 먼저 평균**을 낸다 — 같은 날 종목은 독립이 아니다.
+
+        Given: 하루에 세 종목이 모두 계층에 속하고 이틀치가 있는 프레임
+        When: summarize_layers 호출
+        Then: 일자 표본 수가 2이고 종목 표본 수가 6이다
+        """
+        # Given
+        panel = _panel({f"00000{index}": [100.0, 110.0, 120.0] for index in range(1, 4)})
+        frame = add_excess_returns(compute_forward_returns(panel, horizons=(1,)), horizons=(1,))
+        frame[SignalLayer.UNIVERSE.name.lower()] = True
+
+        # When
+        summary = summarize_layers(frame, layers=(SignalLayer.UNIVERSE,), horizons=(1,))
+
+        # Then
+        row = summary[summary["basis"] == ReturnBasis.CLOSE.value].iloc[0]
+        assert int(row["day_count"]) == 2
+        assert int(row["ticker_count"]) == 6
+
+    def test_rejects_missing_layer_column(self):
+        """
+        목적: 계층 컬럼이 없으면 조용히 빈 집계를 내지 않고 즉시 거부한다.
+
+        Given: 계층 컬럼이 없는 프레임
+        When: summarize_layers 호출
+        Then: ValueError
+        """
+        # Given
+        panel = _panel({"000001": [100.0, 110.0], "000002": [100.0, 100.0]})
+        frame = add_excess_returns(compute_forward_returns(panel, horizons=(1,)), horizons=(1,))
+
+        # When / Then
+        with pytest.raises(ValueError, match="계층 컬럼"):
+            summarize_layers(frame, layers=(SignalLayer.UNIVERSE,), horizons=(1,))

@@ -49,7 +49,7 @@ CLI 스크립트 계층(`scripts/`)은 사용자 인터페이스를 제공하며
 - 자동 기록 항목: ISO 8601 타임스탬프 (KST), 실행 파라미터, 핵심 통계
 - 순환 저장: 최근 N개만 유지 (`MAX_HISTORY_COUNT`)
 - 저장 위치: `storage/meta/meta.json`
-- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크), `snapshot_backfill`(1단 스냅샷 수집), `snapshot_quality`(품질 검증 리포트), `adjusted_backfill`(2단 수정주가 수집), `adjusted_quality`(2단 정합성 리포트), `panel_build`(백테스트 통합 패널 빌드), `backtest_run`(백테스트 실행). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
+- 지원 타입: `pykrx_gate`(검증 게이트 스팟체크), `snapshot_backfill`(1단 스냅샷 수집), `snapshot_quality`(품질 검증 리포트), `adjusted_backfill`(2단 수정주가 수집), `adjusted_quality`(2단 정합성 리포트), `panel_build`(백테스트 통합 패널 빌드), `backtest_run`(백테스트 실행), `event_study`(신호 예측력 이벤트 스터디). 신규 타입은 스크립트 구현 시 정의하고 이 문서에 추가
 
 근거 위치: [src/krx_sprint/utils/meta_manager.py](../src/krx_sprint/utils/meta_manager.py), [src/krx_sprint/common_constants.py](../src/krx_sprint/common_constants.py)
 
@@ -121,6 +121,9 @@ main 함수:
 백테스트 실행 진입점을 배치한다. 통합 패널을 읽어 신호·체결·성과를 산출하고
 결과를 `storage/backtest/{run_id}/`에 남긴다 (백테스트 설계 §9).
 전략 파라미터는 스크립트가 아니라 `src/krx_sprint/backtest/params.py`가 단일 관리한다.
+
+**매매 규칙을 뺀 신호 예측력 측정(이벤트 스터디)도 이 폴더에 둔다.** 신호를 바꿀 때마다 다시
+돌리는 재사용 도구이므로 `adhoc/`이 아니다. 산출물 위치와 파라미터 관리 원칙은 백테스트와 같다.
 
 ### 일회성 진단 (adhoc/)
 

@@ -236,5 +236,28 @@
       "output": "/Users/yubeen/Workspace/krx-sprint/storage/backtest/20260729_093058_in-sample-nocost",
       "timestamp": "2026-07-29T09:30:58+09:00"
     }
+  ],
+  "event_study": [
+    {
+      "start": null,
+      "end": null,
+      "output": "20260807_093917_full-period",
+      "test_count": 70,
+      "timestamp": "2026-08-07T09:39:17+09:00"
+    },
+    {
+      "start": "2019-01-01",
+      "end": "2022-12-31",
+      "output": "20260807_093557_in-sample",
+      "test_count": 70,
+      "timestamp": "2026-08-07T09:35:57+09:00"
+    },
+    {
+      "start": "2022-01-01",
+      "end": "2022-12-31",
+      "output": "20260807_093146_smoke",
+      "test_count": 70,
+      "timestamp": "2026-08-07T09:31:46+09:00"
+    }
   ]
 }

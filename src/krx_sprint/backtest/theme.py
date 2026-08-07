@@ -94,8 +94,8 @@ def find_clusters(
         raise ValueError(f"신호일 데이터가 패널에 없습니다: {target.isoformat()}")
 
     # 1. 유니버스 게이트 → 당일 급등 집합
-    universe = _apply_universe_gates(history, today, params, listed_days)
-    surged = _surged_tickers(today, universe, params)
+    universe = apply_universe_gates(history, today, params, listed_days)
+    surged = surged_tickers(today, universe, params)
     if len(surged) < params.min_cluster_size:
         return ()
 
@@ -222,7 +222,7 @@ def _normalized_ranks(values: Sequence[float]) -> list[float]:
     return [position[value] for value in values]
 
 
-def _apply_universe_gates(
+def apply_universe_gates(
     history: pd.DataFrame,
     today: pd.DataFrame,
     params: StrategyParams,
@@ -250,7 +250,7 @@ def _apply_universe_gates(
     }
 
 
-def _surged_tickers(today: pd.DataFrame, universe: set[str], params: StrategyParams) -> list[str]:
+def surged_tickers(today: pd.DataFrame, universe: set[str], params: StrategyParams) -> list[str]:
     """당일 급등 종목을 고른다.
 
     등락률은 **1단 원본가** 기준이다 (스펙 §10.3).
